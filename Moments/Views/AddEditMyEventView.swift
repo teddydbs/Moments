@@ -170,7 +170,7 @@ struct AddEditMyEventView: View {
                             DatePicker(
                                 "Date limite",
                                 selection: $rsvpDeadline,
-                                in: ...date,
+                                in: Date()...date,
                                 displayedComponents: [.date]
                             )
                         }
