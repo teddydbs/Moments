@@ -143,12 +143,15 @@ struct MyEventDetailView: View {
 
                                 // ✅ Carte interactive
                                 if let coordinate = locationCoordinate {
-                                    Map(position: $mapPosition) {
+                                    Map(position: $mapPosition, interactionModes: []) {
                                         Marker(myEvent.location ?? "Lieu", coordinate: coordinate)
                                     }
                                     .frame(height: 200)
                                     .cornerRadius(12)
-                                    .allowsHitTesting(true) // Permettre l'interaction avec la carte
+                                    .onTapGesture {
+                                        // Ouvrir Apple Maps avec les coordonnées
+                                        openInMaps(coordinate: coordinate)
+                                    }
                                 }
                             }
                             .padding()
@@ -349,6 +352,20 @@ struct MyEventDetailView: View {
     }
 
     // MARK: - Methods
+
+    /// Ouvre Apple Maps avec les coordonnées du lieu
+    /// - Parameter coordinate: Les coordonnées GPS du lieu
+    private func openInMaps(coordinate: CLLocationCoordinate2D) {
+        // ❓ POURQUOI: MKMapItem permet d'ouvrir Apple Maps avec un lieu précis
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = myEvent.location ?? "Lieu de l'événement"
+
+        // ✅ Ouvrir dans Apple Maps avec itinéraire
+        mapItem.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
+        ])
+    }
 
     /// Géocode une adresse pour obtenir les coordonnées GPS
     /// - Parameter address: L'adresse à géocoder

@@ -134,7 +134,7 @@ struct AddEditMyEventView: View {
 
                         // ✅ Carte interactive si on a une adresse
                         if let coordinate = locationCoordinate {
-                            Map(position: $mapPosition) {
+                            Map(position: $mapPosition, interactionModes: []) {
                                 Marker(location.isEmpty ? "Lieu" : location, coordinate: coordinate)
                             }
                             .frame(height: 200)
@@ -145,6 +145,10 @@ struct AddEditMyEventView: View {
                                     center: coordinate,
                                     span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
                                 ))
+                            }
+                            .onTapGesture {
+                                // Ouvrir Apple Maps avec les coordonnées
+                                openInMaps(coordinate: coordinate)
                             }
                         }
                     }
@@ -197,6 +201,20 @@ struct AddEditMyEventView: View {
     }
 
     // MARK: - Methods
+
+    /// Ouvre Apple Maps avec les coordonnées du lieu
+    /// - Parameter coordinate: Les coordonnées GPS du lieu
+    private func openInMaps(coordinate: CLLocationCoordinate2D) {
+        // ❓ POURQUOI: MKMapItem permet d'ouvrir Apple Maps avec un lieu précis
+        let placemark = MKPlacemark(coordinate: coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = location.isEmpty ? "Lieu de l'événement" : location
+
+        // ✅ Ouvrir dans Apple Maps
+        mapItem.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
+        ])
+    }
 
     /// Géocode une adresse pour obtenir les coordonnées GPS
     /// - Parameter address: L'adresse à géocoder
