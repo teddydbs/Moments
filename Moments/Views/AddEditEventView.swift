@@ -17,6 +17,10 @@ struct AddEditEventView: View {
 
     @State private var title: String = ""
     @State private var date: Date = Date()
+    @State private var time: Date = Date()
+    @State private var hasTime: Bool = false
+    @State private var location: String = ""
+    @State private var locationAddress: String = ""
     @State private var category: EventCategory = .birthday
     @State private var isRecurring: Bool = false
     @State private var notes: String = ""
@@ -61,6 +65,27 @@ struct AddEditEventView: View {
                         displayedComponents: [.date]
                     )
                     .datePickerStyle(.compact)
+
+                    Toggle("Ajouter une heure", isOn: $hasTime)
+
+                    if hasTime {
+                        DatePicker(
+                            "Heure",
+                            selection: $time,
+                            displayedComponents: [.hourAndMinute]
+                        )
+                        .datePickerStyle(.compact)
+                    }
+                }
+
+                // SECTION: Lieu
+                Section("Lieu (optionnel)") {
+                    TextField("Nom du lieu", text: $location)
+                        .font(.body)
+
+                    TextField("Adresse", text: $locationAddress)
+                        .font(.body)
+                        .foregroundColor(.secondary)
                 }
 
                 // SECTION: Catégorie
@@ -237,6 +262,10 @@ struct AddEditEventView: View {
                 if let event = event {
                     title = event.title
                     date = event.date
+                    time = event.time ?? Date()
+                    hasTime = event.time != nil
+                    location = event.location ?? ""
+                    locationAddress = event.locationAddress ?? ""
                     category = event.category
                     isRecurring = event.isRecurring
                     notes = event.notes
@@ -262,6 +291,9 @@ struct AddEditEventView: View {
                 if let event = event {
                     event.title = title
                     event.date = date
+                    event.time = hasTime ? time : nil
+                    event.location = location.isEmpty ? nil : location
+                    event.locationAddress = locationAddress.isEmpty ? nil : locationAddress
                     event.category = category
                     event.isRecurring = isRecurring
                     event.notes = notes
@@ -296,6 +328,9 @@ struct AddEditEventView: View {
                 let newEvent = Event(
                     title: title,
                     date: date,
+                    time: hasTime ? time : nil,
+                    location: location.isEmpty ? nil : location,
+                    locationAddress: locationAddress.isEmpty ? nil : locationAddress,
                     category: category,
                     isRecurring: isRecurring,
                     notes: notes,

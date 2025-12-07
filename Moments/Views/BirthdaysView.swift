@@ -2,7 +2,8 @@
 //  BirthdaysView.swift
 //  Moments
 //
-//  Created by Teddy Dubois on 04/12/2025.
+//  Vue pour gérer les anniversaires des CONTACTS (amis/famille)
+//  Utilise le modèle Contact (nouvelle architecture)
 //
 
 import SwiftUI
@@ -10,20 +11,43 @@ import SwiftData
 
 struct BirthdaysView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Event.date, order: .forward) private var allEvents: [Event]
 
-    private var birthdays: [Event] {
-        allEvents.filter { $0.category == .birthday }
+    // Query tous les contacts, triés par prochain anniversaire
+    @Query private var allContacts: [Contact]
+
+    // Contacts triés par proximité de leur anniversaire
+    private var sortedContacts: [Contact] {
+        allContacts.sorted { $0.daysUntilBirthday < $1.daysUntilBirthday }
     }
 
-    @State private var showingAddBirthday = false
-    @State private var selectedEvent: Event?
+    // Anniversaires aujourd'hui
+    private var birthdaysToday: [Contact] {
+        sortedContacts.filter { $0.isBirthdayToday }
+    }
+
+    // Anniversaires cette semaine (mais pas aujourd'hui)
+    private var birthdaysThisWeek: [Contact] {
+        sortedContacts.filter { $0.isBirthdayThisWeek && !$0.isBirthdayToday }
+    }
+
+    // Autres anniversaires (plus tard)
+    private var upcomingBirthdays: [Contact] {
+        sortedContacts.filter { !$0.isBirthdayToday && !$0.isBirthdayThisWeek }
+    }
+
+    @State private var showingAddContact = false
+    @State private var selectedContact: Contact?
     @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                if birthdays.isEmpty {
+                // Background gradient
+                MomentsTheme.diagonalGradient
+                    .ignoresSafeArea()
+                    .opacity(0.03)
+
+                if allContacts.isEmpty {
                     emptyStateView
                 } else {
                     birthdaysList
@@ -33,7 +57,7 @@ struct BirthdaysView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        showingAddBirthday = true
+                        showingAddContact = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.title2)
@@ -51,11 +75,11 @@ struct BirthdaysView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingAddBirthday) {
-                AddEditEventView(event: nil, defaultCategory: .birthday)
+            .sheet(isPresented: $showingAddContact) {
+                AddEditContactView(contact: nil)
             }
-            .sheet(item: $selectedEvent) { event in
-                AddEditEventView(event: event, defaultCategory: .birthday)
+            .sheet(item: $selectedContact) { contact in
+                ContactDetailView(contact: contact)
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
@@ -63,9 +87,11 @@ struct BirthdaysView: View {
         }
     }
 
+    // MARK: - Empty State
+
     private var emptyStateView: some View {
         VStack(spacing: 20) {
-            Image(systemName: "gift")
+            Image(systemName: "gift.fill")
                 .font(.system(size: 80))
                 .gradientIcon()
 
@@ -73,15 +99,15 @@ struct BirthdaysView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Ajoutez les anniversaires de vos proches\npour ne jamais les oublier")
+            Text("Ajoutez vos amis et famille pour\nne jamais oublier leur anniversaire")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
             Button {
-                showingAddBirthday = true
+                showingAddContact = true
             } label: {
-                Label("Ajouter un anniversaire", systemImage: "plus.circle.fill")
+                Label("Ajouter un contact", systemImage: "plus.circle.fill")
             }
             .buttonStyle(MomentsTheme.PrimaryButtonStyle())
             .padding(.top)
@@ -89,57 +115,130 @@ struct BirthdaysView: View {
         .padding()
     }
 
+    // MARK: - Birthdays List
+
     private var birthdaysList: some View {
         List {
-            ForEach(birthdays) { event in
-                EventRowView(event: event)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedEvent = event
+            // Section: Anniversaires aujourd'hui
+            if !birthdaysToday.isEmpty {
+                Section {
+                    ForEach(birthdaysToday) { contact in
+                        ContactRowView(contact: contact)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedContact = contact
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deleteContact(contact)
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+
+                                Button {
+                                    selectedContact = contact
+                                } label: {
+                                    Label("Modifier", systemImage: "pencil")
+                                }
+                                .tint(.orange)
+                            }
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            deleteEvent(event)
-                        } label: {
-                            Label("Supprimer", systemImage: "trash")
-                        }
+                } header: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "party.popper.fill")
+                            .foregroundStyle(MomentsTheme.primaryGradient)
+                        Text("Aujourd'hui")
+                            .textCase(.uppercase)
+                            .fontWeight(.semibold)
                     }
+                }
+            }
+
+            // Section: Cette semaine
+            if !birthdaysThisWeek.isEmpty {
+                Section {
+                    ForEach(birthdaysThisWeek) { contact in
+                        ContactRowView(contact: contact)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedContact = contact
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deleteContact(contact)
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+
+                                Button {
+                                    selectedContact = contact
+                                } label: {
+                                    Label("Modifier", systemImage: "pencil")
+                                }
+                                .tint(.orange)
+                            }
+                    }
+                } header: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar.badge.clock")
+                            .foregroundStyle(MomentsTheme.primaryGradient)
+                        Text("Cette semaine")
+                            .textCase(.uppercase)
+                            .fontWeight(.semibold)
+                    }
+                }
+            }
+
+            // Section: À venir
+            if !upcomingBirthdays.isEmpty {
+                Section {
+                    ForEach(upcomingBirthdays) { contact in
+                        ContactRowView(contact: contact)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedContact = contact
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deleteContact(contact)
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+
+                                Button {
+                                    selectedContact = contact
+                                } label: {
+                                    Label("Modifier", systemImage: "pencil")
+                                }
+                                .tint(.orange)
+                            }
+                    }
+                } header: {
+                    Text("À venir")
+                        .textCase(.uppercase)
+                        .fontWeight(.semibold)
+                }
             }
         }
         .listStyle(.insetGrouped)
     }
 
-    private func deleteEvent(_ event: Event) {
-        if let identifier = event.notificationIdentifier {
-            NotificationManager.shared.cancelNotification(identifier: identifier)
+    // MARK: - Methods
+
+    private func deleteContact(_ contact: Contact) {
+        modelContext.delete(contact)
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("❌ Erreur lors de la suppression du contact: \(error)")
         }
-        modelContext.delete(event)
     }
 }
 
+// MARK: - Preview
+
 #Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: Event.self, configurations: config)
-
-    let sampleBirthdays = [
-        Event(
-            title: "Anniversaire de Marie",
-            date: Calendar.current.date(byAdding: .day, value: 5, to: Date())!,
-            category: .birthday,
-            isRecurring: true
-        ),
-        Event(
-            title: "Anniversaire de Paul",
-            date: Calendar.current.date(byAdding: .day, value: 15, to: Date())!,
-            category: .birthday,
-            isRecurring: true
-        )
-    ]
-
-    for birthday in sampleBirthdays {
-        container.mainContext.insert(birthday)
-    }
-
-    return BirthdaysView()
-        .modelContainer(container)
+    BirthdaysView()
+        .modelContainer(for: [Contact.self])
 }

@@ -9,6 +9,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var authManager: AuthManager
+
+    @State private var showingLogoutAlert = false
+    @State private var showingProfile = false
 
     var body: some View {
         NavigationStack {
@@ -42,6 +46,31 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Compte") {
+                    if let user = authManager.currentUser {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(user.name)
+                                .font(.headline)
+                            Text(user.email)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    Button {
+                        showingProfile = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "person.circle.fill")
+                                .gradientIcon()
+                                .frame(width: 30)
+                            Text("Modifier mon profil")
+                                .foregroundColor(.primary)
+                        }
+                    }
+                }
+
                 Section("Données") {
                     Button {
                         // Action pour exporter les données
@@ -66,6 +95,18 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section {
+                    Button(role: .destructive) {
+                        showingLogoutAlert = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .frame(width: 30)
+                            Text("Se déconnecter")
+                        }
+                    }
+                }
             }
             .navigationTitle("Paramètres")
             .navigationBarTitleDisplayMode(.inline)
@@ -75,6 +116,18 @@ struct SettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            .alert("Déconnexion", isPresented: $showingLogoutAlert) {
+                Button("Annuler", role: .cancel) { }
+                Button("Se déconnecter", role: .destructive) {
+                    authManager.logout()
+                    dismiss()
+                }
+            } message: {
+                Text("Êtes-vous sûr de vouloir vous déconnecter ?")
+            }
+            .sheet(isPresented: $showingProfile) {
+                ProfileView()
             }
         }
     }

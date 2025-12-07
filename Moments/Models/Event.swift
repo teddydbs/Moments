@@ -13,6 +13,9 @@ final class Event {
     var id: UUID
     var title: String
     var date: Date
+    var time: Date? // Heure de l'événement (optionnel)
+    var location: String? // Nom du lieu (ex: "Chez Marie", "Restaurant Le Bouquet")
+    var locationAddress: String? // Adresse complète
     var category: EventCategory
     var isRecurring: Bool
     var notes: String
@@ -28,6 +31,9 @@ final class Event {
         id: UUID = UUID(),
         title: String,
         date: Date,
+        time: Date? = nil,
+        location: String? = nil,
+        locationAddress: String? = nil,
         category: EventCategory,
         isRecurring: Bool = false,
         notes: String = "",
@@ -40,6 +46,9 @@ final class Event {
         self.id = id
         self.title = title
         self.date = date
+        self.time = time
+        self.location = location
+        self.locationAddress = locationAddress
         self.category = category
         self.isRecurring = isRecurring
         self.notes = notes

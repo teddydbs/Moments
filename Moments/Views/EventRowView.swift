@@ -27,6 +27,13 @@ struct EventRowView: View {
         return formatter.string(from: event.date)
     }
 
+    private func timeText(_ time: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "fr_FR")
+        return formatter.string(from: time)
+    }
+
     private var countdownText: String {
         if daysUntil == 0 {
             return "Aujourd'hui !"
@@ -94,6 +101,27 @@ struct EventRowView: View {
                 Text(dateText)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                if let time = event.time {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text(timeText(time))
+                            .font(.caption)
+                    }
+                    .foregroundColor(.secondary)
+                }
+
+                if let location = event.location {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin")
+                            .font(.caption2)
+                        Text(location)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(.secondary)
+                }
             }
 
             Spacer()

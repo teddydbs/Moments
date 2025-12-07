@@ -2,7 +2,8 @@
 //  EventsView.swift
 //  Moments
 //
-//  Created by Teddy Dubois on 04/12/2025.
+//  Vue pour gérer MES événements (où TU invites des gens)
+//  Utilise le modèle MyEvent (nouvelle architecture)
 //
 
 import SwiftUI
@@ -10,26 +11,39 @@ import SwiftData
 
 struct EventsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Event.date, order: .forward) private var allEvents: [Event]
 
-    private var events: [Event] {
-        allEvents.filter { $0.category != .birthday }
+    // Query tous les événements
+    @Query(sort: \MyEvent.date, order: .forward) private var allMyEvents: [MyEvent]
+
+    // Événements à venir (pas encore passés)
+    private var upcomingEvents: [MyEvent] {
+        allMyEvents.filter { !$0.isPast }
+    }
+
+    // Événements passés
+    private var pastEvents: [MyEvent] {
+        allMyEvents.filter { $0.isPast }
     }
 
     @State private var showingAddEvent = false
-    @State private var selectedEvent: Event?
+    @State private var selectedEvent: MyEvent?
     @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                if events.isEmpty {
+                // Background gradient
+                MomentsTheme.diagonalGradient
+                    .ignoresSafeArea()
+                    .opacity(0.03)
+
+                if allMyEvents.isEmpty {
                     emptyStateView
                 } else {
                     eventsList
                 }
             }
-            .navigationTitle("Événements")
+            .navigationTitle("Mes Événements")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -52,10 +66,10 @@ struct EventsView: View {
                 }
             }
             .sheet(isPresented: $showingAddEvent) {
-                AddEditEventView(event: nil, defaultCategory: nil)
+                AddEditMyEventView(myEvent: nil)
             }
             .sheet(item: $selectedEvent) { event in
-                EventDetailView(event: event)
+                MyEventDetailView(myEvent: event)
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
@@ -63,9 +77,11 @@ struct EventsView: View {
         }
     }
 
+    // MARK: - Empty State
+
     private var emptyStateView: some View {
         VStack(spacing: 20) {
-            Image(systemName: "calendar.badge.exclamationmark")
+            Image(systemName: "calendar.badge.plus")
                 .font(.system(size: 80))
                 .gradientIcon()
 
@@ -73,7 +89,7 @@ struct EventsView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Ajoutez vos événements importants\n(mariages, soirées, EVG/EVJF...)")
+            Text("Créez vos événements et invitez\nvos amis et famille")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -89,61 +105,88 @@ struct EventsView: View {
         .padding()
     }
 
+    // MARK: - Events List
+
     private var eventsList: some View {
         List {
-            ForEach(events) { event in
-                EventRowView(event: event)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedEvent = event
+            // Section: À venir
+            if !upcomingEvents.isEmpty {
+                Section {
+                    ForEach(upcomingEvents) { event in
+                        MyEventRowView(event: event)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedEvent = event
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deleteEvent(event)
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+
+                                Button {
+                                    selectedEvent = event
+                                } label: {
+                                    Label("Modifier", systemImage: "pencil")
+                                }
+                                .tint(.orange)
+                            }
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            deleteEvent(event)
-                        } label: {
-                            Label("Supprimer", systemImage: "trash")
-                        }
+                } header: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar.badge.clock")
+                            .foregroundStyle(MomentsTheme.primaryGradient)
+                        Text("À venir")
+                            .textCase(.uppercase)
+                            .fontWeight(.semibold)
                     }
+                }
+            }
+
+            // Section: Passés
+            if !pastEvents.isEmpty {
+                Section {
+                    ForEach(pastEvents) { event in
+                        MyEventRowView(event: event)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedEvent = event
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deleteEvent(event)
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+                            }
+                    }
+                } header: {
+                    Text("Passés")
+                        .textCase(.uppercase)
+                        .fontWeight(.semibold)
+                }
             }
         }
         .listStyle(.insetGrouped)
     }
 
-    private func deleteEvent(_ event: Event) {
-        if let identifier = event.notificationIdentifier {
-            NotificationManager.shared.cancelNotification(identifier: identifier)
-        }
+    // MARK: - Methods
+
+    private func deleteEvent(_ event: MyEvent) {
         modelContext.delete(event)
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("❌ Erreur lors de la suppression de l'événement: \(error)")
+        }
     }
 }
 
+// MARK: - Preview
+
 #Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: Event.self, configurations: config)
-
-    let sampleEvents = [
-        Event(
-            title: "Mariage de Sophie",
-            date: Calendar.current.date(byAdding: .day, value: 30, to: Date())!,
-            category: .wedding,
-            notes: "À Paris"
-        ),
-        Event(
-            title: "EVG de Thomas",
-            date: Calendar.current.date(byAdding: .day, value: 15, to: Date())!,
-            category: .bachelorParty
-        ),
-        Event(
-            title: "Soirée d'entreprise",
-            date: Calendar.current.date(byAdding: .day, value: 7, to: Date())!,
-            category: .party
-        )
-    ]
-
-    for event in sampleEvents {
-        container.mainContext.insert(event)
-    }
-
-    return EventsView()
-        .modelContainer(container)
+    EventsView()
+        .modelContainer(for: [MyEvent.self])
 }

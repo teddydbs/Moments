@@ -24,6 +24,13 @@ struct EventDetailView: View {
         return formatter.string(from: event.date)
     }
 
+    private func timeText(_ time: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "fr_FR")
+        return formatter.string(from: time)
+    }
+
     private var daysUntil: Int {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -75,13 +82,22 @@ struct EventDetailView: View {
                             .cornerRadius(8)
                         }
 
-                        // Date et compte à rebours
-                        VStack(spacing: 4) {
+                        // Date, heure et compte à rebours
+                        VStack(spacing: 8) {
                             HStack {
                                 Image(systemName: "calendar")
                                     .foregroundColor(categoryColor)
                                 Text(dateText)
                                     .font(.headline)
+                            }
+
+                            if let time = event.time {
+                                HStack {
+                                    Image(systemName: "clock")
+                                        .foregroundColor(categoryColor)
+                                    Text(timeText(time))
+                                        .font(.subheadline)
+                                }
                             }
 
                             if daysUntil >= 0 {
@@ -94,6 +110,38 @@ struct EventDetailView: View {
                         .frame(maxWidth: .infinity)
                         .background(Color(.systemGray6))
                         .cornerRadius(12)
+
+                        // Lieu
+                        if let location = event.location {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .foregroundColor(categoryColor)
+                                    Text("Lieu")
+                                        .font(.headline)
+                                }
+
+                                Text(location)
+                                    .font(.body)
+
+                                if let address = event.locationAddress, !address.isEmpty {
+                                    Text(address)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+
+                                Button {
+                                    // TODO: Ouvrir dans Plans
+                                } label: {
+                                    Label("Ouvrir dans Plans", systemImage: "map")
+                                        .font(.subheadline)
+                                }
+                                .buttonStyle(MomentsTheme.PrimaryButtonStyle())
+                            }
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                        }
 
                         // Participants
                         VStack(alignment: .leading, spacing: 12) {
