@@ -109,7 +109,7 @@ class ProductMetadataFetcher: ObservableObject {
     ///   - image: L'image à redimensionner
     ///   - maxSize: Taille maximale (largeur ou hauteur)
     /// - Returns: Les données JPEG de l'image redimensionnée
-    private func resizeImage(_ image: UIImage, maxSize: CGFloat) -> Data? {
+    nonisolated private func resizeImage(_ image: UIImage, maxSize: CGFloat) -> Data? {
         let size = image.size
 
         // Si déjà plus petite, pas besoin de redimensionner
