@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import MapKit
 
 struct AddEditMyEventView: View {
     @Environment(\.modelContext) private var modelContext
@@ -26,6 +27,11 @@ struct AddEditMyEventView: View {
     @State private var maxGuests: String = ""
     @State private var hasRSVPDeadline: Bool = false
     @State private var rsvpDeadline: Date = Date()
+
+    // Pour la carte
+    @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var locationCoordinate: CLLocationCoordinate2D?
+    @State private var isGeocodingAddress: Bool = false
 
     private var isEditing: Bool {
         myEvent != nil
@@ -106,8 +112,41 @@ struct AddEditMyEventView: View {
                         TextField("Nom du lieu", text: $location)
                             .textContentType(.location)
 
-                        TextField("Adresse", text: $locationAddress)
-                            .textContentType(.fullStreetAddress)
+                        HStack {
+                            TextField("Adresse", text: $locationAddress)
+                                .textContentType(.fullStreetAddress)
+                                .onChange(of: locationAddress) { oldValue, newValue in
+                                    // ✅ Géocoder l'adresse quand elle change
+                                    if !newValue.isEmpty {
+                                        Task {
+                                            await geocodeAddress(newValue)
+                                        }
+                                    } else {
+                                        locationCoordinate = nil
+                                    }
+                                }
+
+                            if isGeocodingAddress {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                        }
+
+                        // ✅ Carte interactive si on a une adresse
+                        if let coordinate = locationCoordinate {
+                            Map(position: $mapPosition) {
+                                Marker(location.isEmpty ? "Lieu" : location, coordinate: coordinate)
+                            }
+                            .frame(height: 200)
+                            .cornerRadius(12)
+                            .onAppear {
+                                // Centrer la carte sur la position
+                                mapPosition = .region(MKCoordinateRegion(
+                                    center: coordinate,
+                                    span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                                ))
+                            }
+                        }
                     }
 
                     // Section: Invitations
@@ -159,6 +198,42 @@ struct AddEditMyEventView: View {
 
     // MARK: - Methods
 
+    /// Géocode une adresse pour obtenir les coordonnées GPS
+    /// - Parameter address: L'adresse à géocoder
+    private func geocodeAddress(_ address: String) async {
+        isGeocodingAddress = true
+
+        // ❓ POURQUOI: CLGeocoder permet de convertir une adresse en coordonnées GPS
+        let geocoder = CLGeocoder()
+
+        do {
+            // ✅ ÉTAPE 1: Demander les coordonnées à Apple Maps
+            let placemarks = try await geocoder.geocodeAddressString(address)
+
+            // ✅ ÉTAPE 2: Récupérer la première position trouvée
+            if let coordinate = placemarks.first?.location?.coordinate {
+                await MainActor.run {
+                    locationCoordinate = coordinate
+                    // Mettre à jour la position de la carte
+                    mapPosition = .region(MKCoordinateRegion(
+                        center: coordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                    ))
+                }
+            }
+        } catch {
+            print("❌ Erreur de géocodage: \(error.localizedDescription)")
+            // Si l'adresse n'est pas trouvée, on ne fait rien (pas d'alerte pour ne pas déranger)
+            await MainActor.run {
+                locationCoordinate = nil
+            }
+        }
+
+        await MainActor.run {
+            isGeocodingAddress = false
+        }
+    }
+
     private func loadEventData() {
         guard let event = myEvent else { return }
 
@@ -173,6 +248,13 @@ struct AddEditMyEventView: View {
         maxGuests = event.maxGuests != nil ? "\(event.maxGuests!)" : ""
         hasRSVPDeadline = event.rsvpDeadline != nil
         rsvpDeadline = event.rsvpDeadline ?? Date()
+
+        // ✅ Géocoder l'adresse si elle existe
+        if !locationAddress.isEmpty {
+            Task {
+                await geocodeAddress(locationAddress)
+            }
+        }
     }
 
     private func saveEvent() {

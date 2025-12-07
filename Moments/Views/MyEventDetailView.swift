@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import MapKit
 
 struct MyEventDetailView: View {
     @Environment(\.modelContext) private var modelContext
@@ -17,6 +18,10 @@ struct MyEventDetailView: View {
     @State private var showingEditEvent = false
     @State private var showingInvitationManagement = false
     @State private var showingAddGift = false
+
+    // Pour la carte
+    @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var locationCoordinate: CLLocationCoordinate2D?
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -118,7 +123,7 @@ struct MyEventDetailView: View {
                                 .font(.headline)
                                 .padding(.horizontal)
 
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 12) {
                                 if let location = myEvent.location {
                                     HStack(spacing: 12) {
                                         Image(systemName: "mappin.circle.fill")
@@ -135,6 +140,16 @@ struct MyEventDetailView: View {
                                         .foregroundColor(.secondary)
                                         .padding(.leading, 34)
                                 }
+
+                                // ✅ Carte interactive
+                                if let coordinate = locationCoordinate {
+                                    Map(position: $mapPosition) {
+                                        Marker(myEvent.location ?? "Lieu", coordinate: coordinate)
+                                    }
+                                    .frame(height: 200)
+                                    .cornerRadius(12)
+                                    .allowsHitTesting(true) // Permettre l'interaction avec la carte
+                                }
                             }
                             .padding()
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -144,6 +159,12 @@ struct MyEventDetailView: View {
                                     .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
                             )
                             .padding(.horizontal)
+                        }
+                        .task {
+                            // ✅ Géocoder l'adresse au chargement
+                            if let address = myEvent.locationAddress {
+                                await geocodeAddress(address)
+                            }
                         }
                     }
 
@@ -324,6 +345,35 @@ struct MyEventDetailView: View {
             .sheet(isPresented: $showingAddGift) {
                 AddEditWishlistItemView(myEvent: myEvent, wishlistItem: nil)
             }
+        }
+    }
+
+    // MARK: - Methods
+
+    /// Géocode une adresse pour obtenir les coordonnées GPS
+    /// - Parameter address: L'adresse à géocoder
+    private func geocodeAddress(_ address: String) async {
+        // ❓ POURQUOI: CLGeocoder permet de convertir une adresse en coordonnées GPS
+        let geocoder = CLGeocoder()
+
+        do {
+            // ✅ ÉTAPE 1: Demander les coordonnées à Apple Maps
+            let placemarks = try await geocoder.geocodeAddressString(address)
+
+            // ✅ ÉTAPE 2: Récupérer la première position trouvée
+            if let coordinate = placemarks.first?.location?.coordinate {
+                await MainActor.run {
+                    locationCoordinate = coordinate
+                    // Centrer la carte sur la position
+                    mapPosition = .region(MKCoordinateRegion(
+                        center: coordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                    ))
+                }
+            }
+        } catch {
+            print("❌ Erreur de géocodage: \(error.localizedDescription)")
+            // Si l'adresse n'est pas trouvée, on ne fait rien
         }
     }
 }

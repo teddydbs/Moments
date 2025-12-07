@@ -29,6 +29,7 @@
 - Invite management with approval workflow
 - Guest list with RSVP tracking
 - Event-specific wishlists
+- **Interactive map** with automatic address geocoding
 - Location and time management
 
 ### 🎁 Smart Wishlists
@@ -193,6 +194,7 @@ To enable real auth:
 
 - **[NEW_ARCHITECTURE.md](NEW_ARCHITECTURE.md)** - Architecture details
 - **[AUTO_FILL_GUIDE.md](AUTO_FILL_GUIDE.md)** - Auto-fill feature guide
+- **[MAP_FEATURE_GUIDE.md](MAP_FEATURE_GUIDE.md)** - Interactive map feature guide
 - **[AUTH_TEST_GUIDE.md](AUTH_TEST_GUIDE.md)** - Authentication testing
 
 ## 🧪 Testing
@@ -213,7 +215,7 @@ To reset all data:
 ### Current Features ✅
 - [x] Home dashboard with upcoming events
 - [x] Birthday tracking
-- [x] Event management
+- [x] Event management with interactive maps
 - [x] Wishlist creation
 - [x] Auto-fill from product URLs
 - [x] Invitation system
