@@ -23,15 +23,28 @@ struct WishlistItemRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Icône catégorie
-            ZStack {
-                Circle()
-                    .fill(MomentsTheme.primaryGradient.opacity(0.15))
-                    .frame(width: 50, height: 50)
+            // ✅ Image du produit si disponible, sinon icône catégorie
+            Group {
+                if let imageData = item.image,
+                   let uiImage = UIImage(data: imageData) {
+                    // Image du produit récupérée automatiquement
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 50, height: 50)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    // Fallback: icône de catégorie
+                    ZStack {
+                        Circle()
+                            .fill(MomentsTheme.primaryGradient.opacity(0.15))
+                            .frame(width: 50, height: 50)
 
-                Image(systemName: item.category.icon)
-                    .font(.title3)
-                    .gradientIcon()
+                        Image(systemName: item.category.icon)
+                            .font(.title3)
+                            .gradientIcon()
+                    }
+                }
             }
 
             // Informations
