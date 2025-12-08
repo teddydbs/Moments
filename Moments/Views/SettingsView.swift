@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authManager: AuthManager
+    @StateObject private var themeManager = ThemeManager.shared
 
     @State private var showingLogoutAlert = false
     @State private var showingProfile = false
@@ -44,6 +45,20 @@ struct SettingsView: View {
                             Text("Gérer les notifications")
                         }
                     }
+                }
+
+                // ✅ Section pour le choix du thème (clair/sombre/automatique)
+                Section("Apparence") {
+                    Picker("Thème", selection: $themeManager.currentMode) {
+                        ForEach(AppThemeMode.allCases, id: \.self) { mode in
+                            HStack {
+                                Image(systemName: mode.icon)
+                                Text(mode.rawValue)
+                            }
+                            .tag(mode)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
                 }
 
                 Section("Compte") {

@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import MapKit
+import PhotosUI
 
 struct AddEditMyEventView: View {
     @Environment(\.modelContext) private var modelContext
@@ -33,6 +34,12 @@ struct AddEditMyEventView: View {
     @State private var locationCoordinate: CLLocationCoordinate2D?
     @State private var isGeocodingAddress: Bool = false
 
+    // Pour les photos
+    @State private var selectedCoverPhoto: PhotosPickerItem?
+    @State private var coverPhotoData: Data?
+    @State private var selectedProfilePhoto: PhotosPickerItem?
+    @State private var profilePhotoData: Data?
+
     private var isEditing: Bool {
         myEvent != nil
     }
@@ -54,6 +61,73 @@ struct AddEditMyEventView: View {
                     .opacity(0.05)
 
                 Form {
+                    // Section: Photos
+                    Section("Photos de l'événement") {
+                        // Photo de couverture
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Photo de couverture")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+
+                            PhotosPicker(selection: $selectedCoverPhoto, matching: .images) {
+                                if let coverData = coverPhotoData,
+                                   let uiImage = UIImage(data: coverData) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 150)
+                                        .frame(maxWidth: .infinity)
+                                        .clipped()
+                                        .cornerRadius(12)
+                                } else {
+                                    HStack {
+                                        Image(systemName: "photo.fill")
+                                            .font(.title2)
+                                        Text("Ajouter une photo de couverture")
+                                    }
+                                    .frame(height: 150)
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(12)
+                                }
+                            }
+                        }
+
+                        // Photo de profil
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Photo de profil")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+
+                            HStack {
+                                PhotosPicker(selection: $selectedProfilePhoto, matching: .images) {
+                                    if let profileData = profilePhotoData,
+                                       let uiImage = UIImage(data: profileData) {
+                                        Image(uiImage: uiImage)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 80, height: 80)
+                                            .clipShape(Circle())
+                                    } else {
+                                        ZStack {
+                                            Circle()
+                                                .fill(Color(.systemGray6))
+                                                .frame(width: 80, height: 80)
+
+                                            Image(systemName: "person.fill")
+                                                .font(.title)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+
+                                Text("Photo circulaire affichée sur l'événement")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
                     // Section: Type & Titre
                     Section("Informations générales") {
                         Picker("Type d'événement", selection: $type) {
@@ -197,6 +271,20 @@ struct AddEditMyEventView: View {
             .onAppear {
                 loadEventData()
             }
+            .onChange(of: selectedCoverPhoto) { _, newValue in
+                Task {
+                    if let data = try? await newValue?.loadTransferable(type: Data.self) {
+                        coverPhotoData = data
+                    }
+                }
+            }
+            .onChange(of: selectedProfilePhoto) { _, newValue in
+                Task {
+                    if let data = try? await newValue?.loadTransferable(type: Data.self) {
+                        profilePhotoData = data
+                    }
+                }
+            }
         }
     }
 
@@ -266,6 +354,8 @@ struct AddEditMyEventView: View {
         maxGuests = event.maxGuests != nil ? "\(event.maxGuests!)" : ""
         hasRSVPDeadline = event.rsvpDeadline != nil
         rsvpDeadline = event.rsvpDeadline ?? Date()
+        coverPhotoData = event.coverPhoto
+        profilePhotoData = event.profilePhoto
 
         // ✅ Géocoder l'adresse si elle existe
         if !locationAddress.isEmpty {
@@ -287,6 +377,8 @@ struct AddEditMyEventView: View {
             existingEvent.time = hasTime ? time : nil
             existingEvent.location = location.isEmpty ? nil : location
             existingEvent.locationAddress = locationAddress.isEmpty ? nil : locationAddress
+            existingEvent.coverPhoto = coverPhotoData
+            existingEvent.profilePhoto = profilePhotoData
             existingEvent.maxGuests = maxGuestsInt
             existingEvent.rsvpDeadline = hasRSVPDeadline ? rsvpDeadline : nil
             existingEvent.updatedAt = Date()
@@ -300,6 +392,8 @@ struct AddEditMyEventView: View {
                 time: hasTime ? time : nil,
                 location: location.isEmpty ? nil : location,
                 locationAddress: locationAddress.isEmpty ? nil : locationAddress,
+                coverPhoto: coverPhotoData,
+                profilePhoto: profilePhotoData,
                 maxGuests: maxGuestsInt,
                 rsvpDeadline: hasRSVPDeadline ? rsvpDeadline : nil
             )

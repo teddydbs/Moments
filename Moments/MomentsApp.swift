@@ -11,6 +11,7 @@ import SwiftData
 @main
 struct MomentsApp: App {
     @StateObject private var authManager = AuthManager.shared
+    @StateObject private var themeManager = ThemeManager.shared
 
     // Container SwiftData
     var modelContainer: ModelContainer = {
@@ -45,13 +46,17 @@ struct MomentsApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if authManager.isAuthenticated {
-                MainTabView()
-                    .environmentObject(authManager)
-            } else {
-                LoginView()
-                    .environmentObject(authManager)
+            Group {
+                if authManager.isAuthenticated {
+                    MainTabView()
+                        .environmentObject(authManager)
+                } else {
+                    LoginView()
+                        .environmentObject(authManager)
+                }
             }
+            // ✅ Application du thème choisi par l'utilisateur (clair/sombre/automatique)
+            .preferredColorScheme(themeManager.currentMode.colorScheme)
         }
         .modelContainer(modelContainer)
     }

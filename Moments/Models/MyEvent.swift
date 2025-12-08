@@ -66,8 +66,11 @@ class MyEvent {
     /// Adresse complète
     var locationAddress: String?
 
-    /// Photo de couverture de l'événement
+    /// Photo de couverture de l'événement (bannière en haut)
     var coverPhoto: Data?
+
+    /// Photo de profil de l'événement (icône circulaire)
+    var profilePhoto: Data?
 
     /// Nombre maximum d'invités (optionnel, pour gérer la capacité)
     var maxGuests: Int?
@@ -152,6 +155,7 @@ class MyEvent {
         location: String? = nil,
         locationAddress: String? = nil,
         coverPhoto: Data? = nil,
+        profilePhoto: Data? = nil,
         maxGuests: Int? = nil,
         rsvpDeadline: Date? = nil,
         createdAt: Date = Date(),
@@ -166,6 +170,7 @@ class MyEvent {
         self.location = location
         self.locationAddress = locationAddress
         self.coverPhoto = coverPhoto
+        self.profilePhoto = profilePhoto
         self.maxGuests = maxGuests
         self.rsvpDeadline = rsvpDeadline
         self.createdAt = createdAt
