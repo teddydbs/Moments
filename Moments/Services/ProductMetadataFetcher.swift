@@ -283,6 +283,7 @@ class ProductMetadataFetcher: ObservableObject {
         let jsonLDPattern = "<script[^>]*type=\"application/ld\\+json\"[^>]*>([\\s\\S]*?)</script>"
 
         guard let regex = try? NSRegularExpression(pattern: jsonLDPattern, options: [.caseInsensitive]) else {
+            print("❌ JSON-LD: Erreur création regex")
             return nil
         }
 
@@ -290,10 +291,13 @@ class ProductMetadataFetcher: ObservableObject {
         let range = NSRange(location: 0, length: nsString.length)
         let matches = regex.matches(in: html, options: [], range: range)
 
-        for match in matches {
+        print("🔍 JSON-LD: \(matches.count) blocs trouvés dans le HTML")
+
+        for (index, match) in matches.enumerated() {
             if match.numberOfRanges > 1,
                let jsonRange = Range(match.range(at: 1), in: html) {
                 let jsonString = String(html[jsonRange])
+                print("📦 JSON-LD Bloc #\(index + 1): \(jsonString.prefix(200))...")
 
                 // Patterns pour trouver le prix dans le JSON-LD
                 // Format: "price": "89.99" ou "price": 89.99 ou "offers": {"price": "89.99"}
@@ -309,14 +313,17 @@ class ProductMetadataFetcher: ObservableObject {
                             .trimmingCharacters(in: .whitespacesAndNewlines)
 
                         if let price = Double(cleanPrice), price >= 1.0 && price <= 100000 {
-                            print("🎯 Prix JSON-LD trouvé: \(price)€ dans le bloc structured data")
+                            print("🎯 Prix JSON-LD trouvé: \(price)€ dans le bloc #\(index + 1)")
                             return price
+                        } else {
+                            print("⚠️ Prix JSON-LD invalide: \(priceString) -> \(cleanPrice)")
                         }
                     }
                 }
             }
         }
 
+        print("❌ JSON-LD: Aucun prix valide trouvé dans les \(matches.count) blocs")
         return nil
     }
 

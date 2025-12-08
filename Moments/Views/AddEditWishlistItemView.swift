@@ -159,7 +159,7 @@ struct AddEditWishlistItemView: View {
                     }
 
                     // Section: Prix (pré-rempli automatiquement)
-                    Section("Prix estimé") {
+                    Section("Prix") {
                         HStack {
                             TextField("0", text: $price)
                                 .keyboardType(.decimalPad)
