@@ -65,18 +65,34 @@ struct AddEditWishlistItemView: View {
                     // ✅ Section: URL du produit (EN PREMIER et OBLIGATOIRE)
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
-                            TextField("https://example.com/produit", text: $url)
-                                .textContentType(.URL)
-                                .autocapitalization(.none)
-                                .keyboardType(.URL)
-                                .onChange(of: url) { oldValue, newValue in
-                                    // ✅ Auto-fill AUTOMATIQUE dès qu'on entre une URL valide
-                                    if isValidURL(newValue) && !isAutoFilling {
-                                        Task {
-                                            await autoFillFromURL()
+                            HStack {
+                                TextField("https://example.com/produit", text: $url)
+                                    .textContentType(.URL)
+                                    .autocapitalization(.none)
+                                    .keyboardType(.URL)
+                                    .onChange(of: url) { oldValue, newValue in
+                                        // ✅ Auto-fill AUTOMATIQUE dès qu'on entre une URL valide
+                                        if isValidURL(newValue) && !isAutoFilling {
+                                            Task {
+                                                await autoFillFromURL()
+                                            }
                                         }
                                     }
+
+                                // ✅ Bouton Coller
+                                if url.isEmpty {
+                                    Button {
+                                        // Récupérer le contenu du presse-papiers
+                                        if let clipboardContent = UIPasteboard.general.string {
+                                            url = clipboardContent
+                                        }
+                                    } label: {
+                                        Text("Coller")
+                                            .font(.subheadline)
+                                            .foregroundStyle(MomentsTheme.primaryGradient)
+                                    }
                                 }
+                            }
 
                             // Indicateur de chargement
                             if isAutoFilling {
@@ -159,13 +175,22 @@ struct AddEditWishlistItemView: View {
                     }
 
                     // Section: Prix (pré-rempli automatiquement)
-                    Section("Prix") {
+                    Section {
                         HStack {
                             TextField("0", text: $price)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                             Text("€")
                                 .foregroundColor(.secondary)
+                        }
+                    } header: {
+                        Text("Prix")
+                    } footer: {
+                        // ⚠️ Message d'avertissement si Amazon et prix semble incorrect
+                        if url.contains("amazon") || url.contains("amzn") {
+                            Text("⚠️ Pour Amazon, vérifiez et corrigez le prix si nécessaire (prix promotionnel)")
+                                .font(.caption)
+                                .foregroundColor(.orange)
                         }
                     }
 

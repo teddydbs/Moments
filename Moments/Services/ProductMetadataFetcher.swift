@@ -48,7 +48,30 @@ class ProductMetadataFetcher: ObservableObject {
 
         var productMetadata = ProductMetadata()
 
-        // ✅ ÉTAPE 1: Télécharger le HTML de la page
+        // ⚠️ API Amazon Product Advertising désactivée temporairement
+        // L'API nécessite un compte avec des ventes qualifiées
+        // TODO: Réactiver quand le compte Amazon Associates aura généré des ventes
+        /*
+        if urlString.contains("amazon.") || urlString.contains("amzn.") {
+            print("🛒 URL Amazon détectée, utilisation de l'API officielle")
+            if let asin = await AmazonProductAPIManager.shared.extractASIN(from: urlString) {
+                do {
+                    let amazonInfo = try await AmazonProductAPIManager.shared.fetchProductInfo(asin: asin)
+                    productMetadata.title = amazonInfo.title
+                    productMetadata.price = amazonInfo.price
+                    if let imageURL = amazonInfo.imageURL {
+                        productMetadata.imageData = await downloadImage(from: imageURL)
+                    }
+                    print("✅ Données Amazon récupérées via API officielle")
+                    return productMetadata
+                } catch {
+                    print("⚠️ Erreur API Amazon: \(error), fallback vers scraping HTML")
+                }
+            }
+        }
+        */
+
+        // ✅ ÉTAPE 2: Télécharger le HTML de la page (pour les sites non-Amazon ou en fallback)
         guard let html = await downloadHTML(from: url) else {
             print("❌ Impossible de télécharger le HTML, fallback vers LinkPresentation")
             return await fallbackToLinkPresentation(url: url)
@@ -56,9 +79,30 @@ class ProductMetadataFetcher: ObservableObject {
 
         print("✅ HTML téléchargé: \(html.prefix(500))...")
 
-        // ✅ ÉTAPE 2: Extraire les métadonnées Open Graph
-        productMetadata.title = extractOpenGraphTag(from: html, property: "og:title") ?? extractOpenGraphTag(from: html, property: "twitter:title")
-        print("📝 Titre extrait: \(productMetadata.title ?? "nil")")
+        // ✅ Détection Amazon pour extraction spécifique
+        let isAmazon = url.absoluteString.contains("amazon") || url.absoluteString.contains("amzn")
+
+        // ✅ ÉTAPE 2: Extraire le titre
+        var rawTitle: String?
+
+        if isAmazon {
+            // Amazon: Extraction spécifique depuis JavaScript ou <title>
+            rawTitle = extractAmazonTitle(from: html)
+        }
+
+        // Fallback vers Open Graph si Amazon n'a pas fonctionné ou si ce n'est pas Amazon
+        if rawTitle == nil {
+            rawTitle = extractOpenGraphTag(from: html, property: "og:title") ?? extractOpenGraphTag(from: html, property: "twitter:title")
+        }
+
+        // ✅ Raccourcir le titre si trop long (garder marque + type de produit)
+        if let title = rawTitle, title.count > 60 {
+            productMetadata.title = shortenProductTitle(title)
+            print("📝 Titre raccourci: \(productMetadata.title ?? "nil") (original: \(title.prefix(50))...)")
+        } else {
+            productMetadata.title = rawTitle
+            print("📝 Titre extrait: \(productMetadata.title ?? "nil")")
+        }
 
         // ✅ ÉTAPE 3: Extraire l'image avec plusieurs stratégies
         productMetadata.imageData = await extractProductImage(from: html, baseURL: url)
@@ -74,12 +118,17 @@ class ProductMetadataFetcher: ObservableObject {
             productMetadata.price = Double(priceString)
             print("💰 Prix Open Graph: \(priceString)")
         }
-        // Stratégie 3: Microdata (itemprop)
+        // Stratégie 3: JavaScript Data (Amazon, sites dynamiques)
+        else if let jsPrice = extractPriceFromJavaScriptData(html: html) {
+            productMetadata.price = jsPrice
+            print("💰 Prix JavaScript: \(jsPrice)")
+        }
+        // Stratégie 4: Microdata (itemprop)
         else if let microdataPrice = extractPriceFromMicrodata(html: html) {
             productMetadata.price = microdataPrice
             print("💰 Prix Microdata: \(microdataPrice)")
         }
-        // Stratégie 4: Fallback HTML avec patterns spécifiques
+        // Stratégie 5: Fallback HTML avec patterns spécifiques
         else {
             productMetadata.price = extractPriceFromHTML(html)
             print("💰 Prix HTML: \(productMetadata.price ?? 0)")
@@ -151,7 +200,31 @@ class ProductMetadataFetcher: ObservableObject {
     }
 
     /// Télécharge le HTML d'une page web
+    /// ✅ Utilise ScraperAPI pour Amazon (avec JavaScript) si configuré
     private func downloadHTML(from url: URL) async -> String? {
+        var finalURLString = url.absoluteString
+
+        // ✅ ÉTAPE 1: Si URL raccourcie Amazon, extraire l'ASIN et construire l'URL complète
+        if finalURLString.contains("amzn.eu") || finalURLString.contains("amzn.to") {
+            print("🔗 URL raccourcie Amazon, extraction de l'ASIN...")
+            if let asin = await AmazonProductAPIManager.shared.extractASIN(from: finalURLString) {
+                finalURLString = "https://www.amazon.fr/dp/\(asin)"
+                print("✅ URL complète reconstruite: \(finalURLString)")
+            }
+        }
+
+        // ✅ ÉTAPE 2: Si c'est Amazon ET ScraperAPI est configuré, utiliser ScraperAPI
+        if (finalURLString.contains("amazon") || finalURLString.contains("amzn")) && ScraperAPIManager.shared.isConfigured {
+            print("🚀 Utilisation de ScraperAPI pour Amazon (avec JavaScript)")
+            do {
+                return try await ScraperAPIManager.shared.fetchHTML(from: finalURLString)
+            } catch {
+                print("⚠️ ScraperAPI échoué, fallback vers scraping classique")
+                // Continue avec scraping classique en cas d'erreur
+            }
+        }
+
+        // Scraping classique (sans JavaScript)
         do {
             var request = URLRequest(url: url)
             request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -186,6 +259,17 @@ class ProductMetadataFetcher: ObservableObject {
     ///   - baseURL: L'URL de base pour les liens relatifs
     /// - Returns: Les données de l'image ou nil
     private func extractProductImage(from html: String, baseURL: URL) async -> Data? {
+        // ✅ STRATÉGIE 0: Amazon - Image principale du produit (landingImage ou hiRes)
+        if baseURL.absoluteString.contains("amazon") {
+            if let amazonImageURL = extractAmazonMainImage(from: html) {
+                print("🖼️ Image principale Amazon trouvée: \(amazonImageURL)")
+                if let imageData = await downloadImage(from: amazonImageURL) {
+                    print("✅ Image principale Amazon téléchargée")
+                    return imageData
+                }
+            }
+        }
+
         // ✅ STRATÉGIE 1: Open Graph (og:image) - Le plus fiable
         if let ogImageURL = extractOpenGraphTag(from: html, property: "og:image") {
             print("🖼️ Image Open Graph trouvée: \(ogImageURL)")
@@ -352,6 +436,157 @@ class ProductMetadataFetcher: ObservableObject {
         return nil
     }
 
+    /// Raccourcit un titre de produit en gardant l'essentiel (marque + type)
+    /// Exemple: "SONGMICS Chaise de Bureau, Chaise Ergonomique, avec..." → "SONGMICS Chaise de Bureau"
+    private func shortenProductTitle(_ title: String) -> String {
+        // Supprimer les informations après une virgule, tiret ou parenthèse
+        let separators = [",", " -", "(", "|"]
+
+        var shortened = title
+        for separator in separators {
+            if let range = shortened.range(of: separator) {
+                shortened = String(shortened[..<range.lowerBound])
+                break
+            }
+        }
+
+        // Limiter à 50 caractères maximum
+        if shortened.count > 50 {
+            shortened = String(shortened.prefix(50)).trimmingCharacters(in: .whitespaces) + "..."
+        }
+
+        return shortened.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Extrait le titre Amazon depuis le HTML
+    /// PRIORITÉ à la balise <title> qui est la plus fiable
+    private func extractAmazonTitle(from html: String) -> String? {
+        // Stratégie 1: Balise <title> (LE PLUS FIABLE)
+        if let titleRange = html.range(of: "<title>", options: .caseInsensitive),
+           let endTitleRange = html.range(of: "</title>", options: .caseInsensitive, range: titleRange.upperBound..<html.endIndex) {
+
+            let titleContent = String(html[titleRange.upperBound..<endTitleRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Supprimer " : Amazon.fr..." ou "- Amazon.fr..." à la fin
+            var cleanTitle = titleContent
+
+            if let amazonSeparator = cleanTitle.range(of: " : Amazon", options: .caseInsensitive) {
+                cleanTitle = String(cleanTitle[..<amazonSeparator.lowerBound])
+            } else if let amazonSeparator = cleanTitle.range(of: "- Amazon", options: .caseInsensitive) {
+                cleanTitle = String(cleanTitle[..<amazonSeparator.lowerBound])
+            }
+
+            cleanTitle = cleanTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Vérifier que ce n'est pas du code CSS ou JavaScript
+            if !cleanTitle.isEmpty && !cleanTitle.contains("<style") && !cleanTitle.contains("{") {
+                print("🎯 Titre Amazon extrait de <title>: \(cleanTitle.prefix(60))...")
+                return cleanTitle
+            }
+        }
+
+        // Stratégie 2: Meta property="og:title"
+        if let ogTitleRange = html.range(of: "<meta\\s+property=\"og:title\"\\s+content=\"([^\"]+)\"", options: .regularExpression),
+           let regex = try? NSRegularExpression(pattern: "<meta\\s+property=\"og:title\"\\s+content=\"([^\"]+)\"", options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, range: NSRange(ogTitleRange, in: html)),
+           match.numberOfRanges > 1,
+           let contentRange = Range(match.range(at: 1), in: html) {
+
+            let ogTitle = String(html[contentRange])
+            print("🎯 Titre Amazon extrait de og:title: \(ogTitle.prefix(60))...")
+            return ogTitle
+        }
+
+        // Stratégie 3: ID productTitle dans le HTML
+        if let productTitleRange = html.range(of: "id=\"productTitle\"[^>]*>\\s*([^<]+)", options: .regularExpression),
+           let regex = try? NSRegularExpression(pattern: "id=\"productTitle\"[^>]*>\\s*([^<]+)", options: []),
+           let match = regex.firstMatch(in: html, range: NSRange(productTitleRange, in: html)),
+           match.numberOfRanges > 1,
+           let titleRange = Range(match.range(at: 1), in: html) {
+
+            let productTitle = String(html[titleRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            print("🎯 Titre Amazon extrait de #productTitle: \(productTitle.prefix(60))...")
+            return productTitle
+        }
+
+        print("❌ Aucun titre Amazon trouvé")
+        return nil
+    }
+
+    /// Extrait l'image principale Amazon (haute résolution)
+    /// Amazon stocke les images dans des objets JavaScript
+    private func extractAmazonMainImage(from html: String) -> String? {
+        // Patterns pour trouver l'image principale Amazon (par ordre de préférence)
+        let patterns = [
+            // 1. Image haute résolution dans colorImages (la meilleure qualité)
+            "\"hiRes\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+)\"",
+
+            // 2. Image large dans imageGalleryData
+            "\"large\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+\\.jpg)\"",
+
+            // 3. Meta tag og:image
+            "<meta\\s+property=\"og:image\"\\s+content=\"(https://m\\.media-amazon\\.com/images/I/[^\"]+)\"",
+
+            // 4. Image dans landingImage
+            "\"landingImageUrl\"\\s*:\\s*\"(https://[^\"]+)\"",
+
+            // 5. Pattern générique pour toute image Amazon haute résolution
+            "(https://m\\.media-amazon\\.com/images/I/[A-Za-z0-9+_-]+\\._AC_SL1500_\\.jpg)",
+            "(https://m\\.media-amazon\\.com/images/I/[A-Za-z0-9+_-]+\\._AC_SX\\d+_\\.jpg)",
+        ]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+               let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
+               match.numberOfRanges > 1,
+               let imageRange = Range(match.range(at: 1), in: html) {
+
+                var imageURL = String(html[imageRange])
+
+                // Nettoyer l'URL (parfois il y a des échappements)
+                imageURL = imageURL.replacingOccurrences(of: "\\/", with: "/")
+
+                print("🎯 Image Amazon extraite avec pattern: \(pattern.prefix(60))...")
+                return imageURL
+            }
+        }
+
+        print("❌ Aucune image Amazon haute résolution trouvée")
+        return nil
+    }
+
+    /// Extrait le prix depuis les objets JavaScript embarqués d'Amazon
+    /// Amazon stocke souvent les prix dans des blocs JSON dans <script> ou data attributes
+    private func extractPriceFromJavaScriptData(html: String) -> Double? {
+        // Patterns pour extraire les prix depuis les objets JS d'Amazon
+        let patterns = [
+            // Prix dans les objets JSON JavaScript (ex: priceAmount, displayPrice)
+            "\"priceAmount\"\\s*:\\s*([0-9]+\\.?[0-9]{0,2})",
+            "\"displayPrice\"\\s*:\\s*\"?([0-9]+[.,]?[0-9]{0,2})\"?",
+            "\"ourPrice\"\\s*:\\s*\"?([0-9]+[.,]?[0-9]{0,2})\"?",
+            "\"salePrice\"\\s*:\\s*\"?([0-9]+[.,]?[0-9]{0,2})\"?",
+            // Prix dans data-attributes
+            "data-a-price-amount=\"([0-9]+\\.?[0-9]{0,2})\"",
+            "data-price=\"([0-9]+[.,]?[0-9]{0,2})\"",
+        ]
+
+        for pattern in patterns {
+            if let priceString = extractFirstMatch(from: html, pattern: pattern) {
+                let cleanPrice = priceString
+                    .replacingOccurrences(of: ",", with: ".")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if let price = Double(cleanPrice), price >= 1.0 && price <= 100000 {
+                    print("🎯 Prix JavaScript trouvé: \(price)€ avec pattern: \(pattern)")
+                    return price
+                }
+            }
+        }
+
+        return nil
+    }
+
     /// Extrait l'URL de l'image depuis les balises <img>
     private func extractImageFromImgTag(html: String) -> String? {
         // Chercher les <img> avec des classes spécifiques aux produits
@@ -422,11 +657,23 @@ class ProductMetadataFetcher: ObservableObject {
         // ✅ Patterns exhaustifs pour capturer le maximum de formats de prix
         // NOTE: L'ordre est IMPORTANT - les patterns les plus spécifiques doivent être en premier
         let patterns = [
-            // JSON-LD et structured data (très fiable) - EN PREMIER
-            "\"@type\":\\s*\"Offer\"[^}]*\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]{2})",
-            "\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]{2})\"",
+            // ✅✅✅ AMAZON PROMO/DEAL PRICE (ULTRA PRIORITAIRE) - Prix après réduction
+            // Ces patterns ciblent spécifiquement le prix promotionnel, pas le prix barré
+            "class=\"[^\"]*priceToPay[^\"]*\"[\\s\\S]{0,300}?<span[^>]*class=\"[^\"]*a-offscreen[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+)[,\\.]([0-9]{2})",
+            "class=\"[^\"]*priceToPay[^\"]*\"[\\s\\S]{0,300}?<span[^>]*class=\"[^\"]*a-price-whole[^\"]*\"[^>]*>([0-9]+)",
+            "data-a-color=\"price\"[\\s\\S]{0,300}?<span[^>]*class=\"[^\"]*a-offscreen[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+)[,\\.]([0-9]{2})",
+            "id=\"kindle-price\"[\\s\\S]{0,300}?<span[^>]*class=\"[^\"]*a-offscreen[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+)[,\\.]([0-9]{2})",
 
-            // ✅ Amazon spécifique (classes CSS Amazon)
+            // JSON-LD et structured data (très fiable)
+            "\"@type\":\\s*\"Offer\"[^}]*\"price\":\\s*\"?([0-9]+[.,]?[0-9]{2})",
+            "\"price\":\\s*\"?([0-9]+[.,]?[0-9]{2})\"",
+
+            // ✅ Amazon spécifique - Chercher explicitement dans la zone de prix principal
+            // Pattern très spécifique: div avec id contenant "price" puis span avec le prix
+            "id=\"corePriceDisplay_desktop_feature_div\"[\\s\\S]{0,500}?<span[^>]*class=\"[^\"]*a-price-whole[^\"]*\"[^>]*>([0-9]+)",
+            "id=\"corePrice_desktop_feature_div\"[\\s\\S]{0,500}?<span[^>]*class=\"[^\"]*a-offscreen[^\"]*\"[^>]*>([0-9]+)[,\\.]([0-9]{2})",
+
+            // Patterns Amazon généraux (moins spécifiques)
             "<span[^>]*class=\"[^\"]*a-price-whole[^\"]*\"[^>]*>([0-9]+)[,\\.]?</span>",
             "<span[^>]*class=\"[^\"]*a-offscreen[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+)[,\\.]([0-9]{2})",
             "id=\"priceblock_ourprice\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
