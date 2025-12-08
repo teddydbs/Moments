@@ -27,7 +27,6 @@ struct AddEditWishlistItemView: View {
 
     // Pour le remplissage automatique
     @StateObject private var metadataFetcher = ProductMetadataFetcher()
-    @State private var showingAutoFillAlert = false
     @State private var isAutoFilling = false
 
     init(myEvent: MyEvent?, contact: Contact? = nil, wishlistItem: WishlistItem?) {
@@ -63,8 +62,43 @@ struct AddEditWishlistItemView: View {
                     .opacity(0.05)
 
                 Form {
-                    // Section: Informations
-                    Section("Informations") {
+                    // ✅ Section: URL du produit (EN PREMIER et OBLIGATOIRE)
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("https://example.com/produit", text: $url)
+                                .textContentType(.URL)
+                                .autocapitalization(.none)
+                                .keyboardType(.URL)
+                                .onChange(of: url) { oldValue, newValue in
+                                    // ✅ Auto-fill AUTOMATIQUE dès qu'on entre une URL valide
+                                    if isValidURL(newValue) && !isAutoFilling {
+                                        Task {
+                                            await autoFillFromURL()
+                                        }
+                                    }
+                                }
+
+                            // Indicateur de chargement
+                            if isAutoFilling {
+                                HStack {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                    Text("Récupération des informations du produit...")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.top, 4)
+                            }
+                        }
+                    } header: {
+                        Text("Lien du produit")
+                    } footer: {
+                        Text("💡 Collez le lien du produit, toutes les informations se rempliront automatiquement")
+                            .font(.caption)
+                    }
+
+                    // Section: Informations (pré-remplies automatiquement)
+                    Section {
                         TextField("Nom du cadeau", text: $title)
                             .textContentType(.name)
 
@@ -94,9 +128,14 @@ struct AddEditWishlistItemView: View {
                                 .tag(cat)
                             }
                         }
+                    } header: {
+                        Text("Informations")
+                    } footer: {
+                        Text("Ces informations sont remplies automatiquement, vous pouvez les modifier si besoin")
+                            .font(.caption)
                     }
 
-                    // Section: Image du produit
+                    // Section: Image du produit (pré-remplie automatiquement)
                     if let currentImageData = imageData,
                        let uiImage = UIImage(data: currentImageData) {
                         Section("Image du produit") {
@@ -119,59 +158,14 @@ struct AddEditWishlistItemView: View {
                         }
                     }
 
-                    // Section: Prix & Lien
-                    Section {
+                    // Section: Prix (pré-rempli automatiquement)
+                    Section("Prix estimé") {
                         HStack {
-                            Text("Prix estimé")
-                            Spacer()
                             TextField("0", text: $price)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
-                                .frame(width: 100)
                             Text("€")
                                 .foregroundColor(.secondary)
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            TextField("Lien du produit (optionnel)", text: $url)
-                                .textContentType(.URL)
-                                .autocapitalization(.none)
-                                .keyboardType(.URL)
-                                .onChange(of: url) { oldValue, newValue in
-                                    // ✅ Afficher le bouton de remplissage auto si URL valide
-                                    if isValidURL(newValue) && !isAutoFilling {
-                                        showingAutoFillAlert = true
-                                    }
-                                }
-
-                            // Bouton de remplissage automatique
-                            if isValidURL(url) && !url.isEmpty {
-                                Button {
-                                    Task {
-                                        await autoFillFromURL()
-                                    }
-                                } label: {
-                                    HStack {
-                                        if isAutoFilling {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                        } else {
-                                            Image(systemName: "wand.and.stars")
-                                        }
-                                        Text(isAutoFilling ? "Récupération..." : "Remplir automatiquement")
-                                            .font(.subheadline)
-                                    }
-                                    .foregroundStyle(MomentsTheme.primaryGradient)
-                                }
-                                .disabled(isAutoFilling)
-                            }
-                        }
-                    } header: {
-                        Text("Prix et lien")
-                    } footer: {
-                        if isValidURL(url) {
-                            Text("💡 L'app peut récupérer automatiquement le nom, le prix et l'image du produit")
-                                .font(.caption)
                         }
                     }
 
@@ -233,8 +227,9 @@ struct AddEditWishlistItemView: View {
                     Button(saveButtonTitle) {
                         saveWishlistItem()
                     }
-                    .disabled(title.isEmpty)
-                    .foregroundColor(title.isEmpty ? .secondary : MomentsTheme.primaryPurple)
+                    // ✅ URL obligatoire (le titre se remplit auto)
+                    .disabled(url.isEmpty || !isValidURL(url))
+                    .foregroundColor((url.isEmpty || !isValidURL(url)) ? .secondary : MomentsTheme.primaryPurple)
                 }
             }
             .onAppear {
@@ -254,16 +249,15 @@ struct AddEditWishlistItemView: View {
     /// Remplit automatiquement les champs depuis l'URL
     private func autoFillFromURL() async {
         isAutoFilling = true
-        showingAutoFillAlert = false
 
-        // ❓ POURQUOI: On récupère les métadonnées du produit
+        // ❓ POURQUOI: On récupère les métadonnées du produit depuis l'URL
         if let metadata = await metadataFetcher.fetchMetadata(from: url) {
-            // ✅ Remplir uniquement les champs vides pour ne pas écraser les modifications
-            if title.isEmpty, let productTitle = metadata.title {
+            // ✅ Remplir TOUS les champs automatiquement (nouvelle URL = nouvelles infos)
+            if let productTitle = metadata.title {
                 title = productTitle
             }
 
-            if price.isEmpty, let productPrice = metadata.price {
+            if let productPrice = metadata.price {
                 price = String(format: "%.2f", productPrice)
             }
 
@@ -271,11 +265,11 @@ struct AddEditWishlistItemView: View {
                 imageData = productImageData
             }
 
-            // ✅ Afficher un feedback de succès
+            // ✅ Feedback haptique de succès
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.success)
         } else {
-            // ✅ Afficher un feedback d'erreur
+            // ❌ Échec: feedback haptique d'erreur
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.error)
         }
@@ -298,24 +292,27 @@ struct AddEditWishlistItemView: View {
     private func saveWishlistItem() {
         let priceDouble = Double(price.replacingOccurrences(of: ",", with: "."))
 
+        // ✅ Si pas de titre récupéré, utiliser un titre par défaut
+        let finalTitle = title.isEmpty ? "Produit" : title
+
         if let existingItem = wishlistItem {
             // Mise à jour
-            existingItem.title = title
+            existingItem.title = finalTitle
             existingItem.itemDescription = itemDescription.isEmpty ? nil : itemDescription
             existingItem.price = priceDouble
             existingItem.url = url.isEmpty ? nil : url
             existingItem.category = category
             existingItem.priority = priority
-            existingItem.image = imageData // ✅ Sauvegarder l'image
+            existingItem.image = imageData
             existingItem.updatedAt = Date()
         } else {
             // Création
             let newItem = WishlistItem(
-                title: title,
+                title: finalTitle,
                 itemDescription: itemDescription.isEmpty ? nil : itemDescription,
                 price: priceDouble,
                 url: url.isEmpty ? nil : url,
-                image: imageData, // ✅ Sauvegarder l'image
+                image: imageData,
                 category: category,
                 status: .wanted,
                 priority: priority,
