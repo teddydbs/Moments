@@ -63,12 +63,24 @@ class ProductMetadataFetcher: ObservableObject {
         // ✅ ÉTAPE 3: Extraire l'image avec plusieurs stratégies
         productMetadata.imageData = await extractProductImage(from: html, baseURL: url)
 
-        // ✅ ÉTAPE 4: Extraire le prix (Open Graph puis HTML)
-        if let priceString = extractOpenGraphTag(from: html, property: "og:price:amount") ?? extractOpenGraphTag(from: html, property: "product:price:amount") {
+        // ✅ ÉTAPE 4: Extraire le prix avec priorisation intelligente
+        // Stratégie 1: JSON-LD (le plus fiable, structure standardisée)
+        if let jsonLDPrice = extractPriceFromJSONLD(html: html) {
+            productMetadata.price = jsonLDPrice
+            print("💰 Prix JSON-LD: \(jsonLDPrice)")
+        }
+        // Stratégie 2: Open Graph
+        else if let priceString = extractOpenGraphTag(from: html, property: "og:price:amount") ?? extractOpenGraphTag(from: html, property: "product:price:amount") {
             productMetadata.price = Double(priceString)
             print("💰 Prix Open Graph: \(priceString)")
-        } else {
-            // Fallback: chercher dans le HTML
+        }
+        // Stratégie 3: Microdata (itemprop)
+        else if let microdataPrice = extractPriceFromMicrodata(html: html) {
+            productMetadata.price = microdataPrice
+            print("💰 Prix Microdata: \(microdataPrice)")
+        }
+        // Stratégie 4: Fallback HTML avec patterns spécifiques
+        else {
             productMetadata.price = extractPriceFromHTML(html)
             print("💰 Prix HTML: \(productMetadata.price ?? 0)")
         }
@@ -264,6 +276,75 @@ class ProductMetadataFetcher: ObservableObject {
         return extractFirstMatch(from: jsonString, pattern: imagePattern)
     }
 
+    /// Extrait le prix depuis le JSON-LD (données structurées)
+    /// ✅ C'est la méthode LA PLUS FIABLE car standardisée
+    private func extractPriceFromJSONLD(html: String) -> Double? {
+        // Chercher TOUS les blocs <script type="application/ld+json">
+        let jsonLDPattern = "<script[^>]*type=\"application/ld\\+json\"[^>]*>([\\s\\S]*?)</script>"
+
+        guard let regex = try? NSRegularExpression(pattern: jsonLDPattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+
+        let nsString = html as NSString
+        let range = NSRange(location: 0, length: nsString.length)
+        let matches = regex.matches(in: html, options: [], range: range)
+
+        for match in matches {
+            if match.numberOfRanges > 1,
+               let jsonRange = Range(match.range(at: 1), in: html) {
+                let jsonString = String(html[jsonRange])
+
+                // Patterns pour trouver le prix dans le JSON-LD
+                // Format: "price": "89.99" ou "price": 89.99 ou "offers": {"price": "89.99"}
+                let pricePatterns = [
+                    "\"price\"\\s*:\\s*\"?([0-9]+[.,]?[0-9]{0,2})\"?",
+                    "\"lowPrice\"\\s*:\\s*\"?([0-9]+[.,]?[0-9]{0,2})\"?",  // Pour les prix variables
+                ]
+
+                for pattern in pricePatterns {
+                    if let priceString = extractFirstMatch(from: jsonString, pattern: pattern) {
+                        let cleanPrice = priceString
+                            .replacingOccurrences(of: ",", with: ".")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                        if let price = Double(cleanPrice), price >= 1.0 && price <= 100000 {
+                            print("🎯 Prix JSON-LD trouvé: \(price)€ dans le bloc structured data")
+                            return price
+                        }
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Extrait le prix depuis les microdata (itemprop="price")
+    /// ✅ Deuxième méthode la plus fiable après JSON-LD
+    private func extractPriceFromMicrodata(html: String) -> Double? {
+        let patterns = [
+            "itemprop=\"price\"[^>]*content=\"([0-9]+[.,]?[0-9]{0,2})\"",
+            "content=\"([0-9]+[.,]?[0-9]{0,2})\"[^>]*itemprop=\"price\"",
+            "itemprop=\"lowPrice\"[^>]*content=\"([0-9]+[.,]?[0-9]{0,2})\"",
+        ]
+
+        for pattern in patterns {
+            if let priceString = extractFirstMatch(from: html, pattern: pattern) {
+                let cleanPrice = priceString
+                    .replacingOccurrences(of: ",", with: ".")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if let price = Double(cleanPrice), price >= 1.0 && price <= 100000 {
+                    print("🎯 Prix Microdata trouvé: \(price)€")
+                    return price
+                }
+            }
+        }
+
+        return nil
+    }
+
     /// Extrait l'URL de l'image depuis les balises <img>
     private func extractImageFromImgTag(html: String) -> String? {
         // Chercher les <img> avec des classes spécifiques aux produits
@@ -383,7 +464,8 @@ class ProductMetadataFetcher: ObservableObject {
     }
 
     /// Helper pour extraire le premier prix valide avec un pattern donné
-    /// ✅ AMÉLIORATION: Retourne le prix LE PLUS ÉLEVÉ trouvé (le vrai prix produit est généralement > frais de port)
+    /// ✅ Retourne simplement le PREMIER prix valide trouvé
+    /// (Les patterns sont ordonnés du plus spécifique au plus général)
     private func extractFirstPrice(from html: String, pattern: String) -> Double? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
             return nil
@@ -392,45 +474,36 @@ class ProductMetadataFetcher: ObservableObject {
         let nsString = html as NSString
         let range = NSRange(location: 0, length: nsString.length)
 
-        // ✅ Trouver TOUTES les correspondances
-        let matches = regex.matches(in: html, options: [], range: range)
+        // ✅ Trouver la PREMIÈRE correspondance
+        guard let match = regex.firstMatch(in: html, options: [], range: range),
+              match.numberOfRanges > 1 else {
+            return nil
+        }
 
-        var validPrices: [Double] = []
+        let priceRange = match.range(at: 1)
+        guard let swiftRange = Range(priceRange, in: html) else {
+            return nil
+        }
 
-        for match in matches {
-            if match.numberOfRanges > 1 {
-                let priceRange = match.range(at: 1)
-                if let swiftRange = Range(priceRange, in: html) {
-                    var priceString = String(html[swiftRange])
-                        .replacingOccurrences(of: ",", with: ".")
-                        .replacingOccurrences(of: " ", with: "")
-                        .replacingOccurrences(of: "\u{00A0}", with: "") // Espace insécable
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+        var priceString = String(html[swiftRange])
+            .replacingOccurrences(of: ",", with: ".")
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\u{00A0}", with: "") // Espace insécable
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    // Si pattern Amazon avec 2 groupes de capture (partie entière + décimales)
-                    if match.numberOfRanges > 2 {
-                        let decimalRange = match.range(at: 2)
-                        if let decimalSwiftRange = Range(decimalRange, in: html) {
-                            let decimalPart = String(html[decimalSwiftRange])
-                            priceString = "\(priceString).\(decimalPart)"
-                        }
-                    }
-
-                    // ✅ Vérifier que c'est un prix réaliste (entre 1€ et 100000€)
-                    // NOTE: Minimum 1€ pour éviter les frais de port (souvent < 10€)
-                    if let price = Double(priceString), price >= 1.0 && price <= 100000 {
-                        validPrices.append(price)
-                    }
-                }
+        // Si pattern Amazon avec 2 groupes de capture (partie entière + décimales)
+        if match.numberOfRanges > 2 {
+            let decimalRange = match.range(at: 2)
+            if let decimalSwiftRange = Range(decimalRange, in: html) {
+                let decimalPart = String(html[decimalSwiftRange])
+                priceString = "\(priceString).\(decimalPart)"
             }
         }
 
-        // ✅ STRATÉGIE: Retourner le prix LE PLUS ÉLEVÉ
-        // Raison: Le prix du produit est généralement le plus élevé de la page
-        // (les autres prix sont souvent: frais de port, prix barré ancien, etc.)
-        if let maxPrice = validPrices.max() {
-            print("🎯 Prix sélectionné: \(maxPrice)€ parmi \(validPrices.count) prix trouvés: \(validPrices)")
-            return maxPrice
+        // ✅ Vérifier que c'est un prix réaliste (entre 1€ et 100000€)
+        if let price = Double(priceString), price >= 1.0 && price <= 100000 {
+            print("🎯 Prix trouvé: \(price)€")
+            return price
         }
 
         return nil
