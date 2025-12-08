@@ -21,7 +21,6 @@ struct ProductMetadata {
 
 /// Service pour extraire les métadonnées d'un produit depuis une URL
 /// ✅ Utilise LinkPresentation (framework Apple) pour une meilleure fiabilité
-@MainActor
 class ProductMetadataFetcher: ObservableObject {
 
     @Published var isLoading = false
@@ -32,14 +31,20 @@ class ProductMetadataFetcher: ObservableObject {
     /// - Returns: ProductMetadata avec titre, image et prix
     func fetchMetadata(from urlString: String) async -> ProductMetadata? {
         guard let url = URL(string: urlString) else {
-            error = "URL invalide"
+            await MainActor.run { error = "URL invalide" }
             return nil
         }
 
-        isLoading = true
-        error = nil
+        await MainActor.run {
+            isLoading = true
+            error = nil
+        }
 
-        defer { isLoading = false }
+        defer {
+            Task { @MainActor in
+                isLoading = false
+            }
+        }
 
         var productMetadata = ProductMetadata()
 
