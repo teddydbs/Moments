@@ -45,24 +45,48 @@ class ProductMetadataFetcher: ObservableObject {
 
         // ✅ ÉTAPE 1: Télécharger le HTML de la page
         guard let html = await downloadHTML(from: url) else {
-            print("❌ Impossible de télécharger le HTML")
+            print("❌ Impossible de télécharger le HTML, fallback vers LinkPresentation")
             return await fallbackToLinkPresentation(url: url)
         }
 
+        print("✅ HTML téléchargé: \(html.prefix(500))...")
+
         // ✅ ÉTAPE 2: Extraire les métadonnées Open Graph
         productMetadata.title = extractOpenGraphTag(from: html, property: "og:title") ?? extractOpenGraphTag(from: html, property: "twitter:title")
+        print("📝 Titre extrait: \(productMetadata.title ?? "nil")")
 
         // ✅ ÉTAPE 3: Extraire l'image Open Graph (meilleure que LinkPresentation)
         if let imageURL = extractOpenGraphTag(from: html, property: "og:image") ?? extractOpenGraphTag(from: html, property: "twitter:image") {
-            productMetadata.imageData = await downloadImage(from: imageURL)
+            print("🖼️ URL image Open Graph: \(imageURL)")
+            // Gérer les URLs relatives
+            let fullImageURL = makeAbsoluteURL(imageURL, baseURL: url)
+            productMetadata.imageData = await downloadImage(from: fullImageURL)
+        } else {
+            print("❌ Pas d'image Open Graph trouvée")
         }
 
         // ✅ ÉTAPE 4: Extraire le prix (Open Graph puis HTML)
         if let priceString = extractOpenGraphTag(from: html, property: "og:price:amount") ?? extractOpenGraphTag(from: html, property: "product:price:amount") {
             productMetadata.price = Double(priceString)
+            print("💰 Prix Open Graph: \(priceString)")
         } else {
             // Fallback: chercher dans le HTML
             productMetadata.price = extractPriceFromHTML(html)
+            print("💰 Prix HTML: \(productMetadata.price ?? 0)")
+        }
+
+        // Si on n'a rien récupéré, fallback vers LinkPresentation
+        if productMetadata.title == nil || productMetadata.imageData == nil {
+            print("⚠️ Données incomplètes, fallback vers LinkPresentation")
+            let fallbackData = await fallbackToLinkPresentation(url: url)
+
+            // Garder les données qu'on a réussi à récupérer
+            if productMetadata.title == nil {
+                productMetadata.title = fallbackData?.title
+            }
+            if productMetadata.imageData == nil {
+                productMetadata.imageData = fallbackData?.imageData
+            }
         }
 
         // Nettoyer le titre
@@ -97,6 +121,24 @@ class ProductMetadataFetcher: ObservableObject {
     }
 
     // MARK: - Helper Methods
+
+    /// Convertit une URL relative en URL absolue
+    private func makeAbsoluteURL(_ urlString: String, baseURL: URL) -> String {
+        // Si c'est déjà une URL absolue, la retourner telle quelle
+        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
+            return urlString
+        }
+
+        // Si c'est une URL relative commençant par /
+        if urlString.hasPrefix("/") {
+            if let scheme = baseURL.scheme, let host = baseURL.host {
+                return "\(scheme)://\(host)\(urlString)"
+            }
+        }
+
+        // Sinon, concaténer avec l'URL de base
+        return baseURL.absoluteString + urlString
+    }
 
     /// Télécharge le HTML d'une page web
     private func downloadHTML(from url: URL) async -> String? {
