@@ -332,33 +332,42 @@ class ProductMetadataFetcher: ObservableObject {
     /// Extrait le prix depuis le HTML (fallback si pas d'Open Graph)
     private func extractPriceFromHTML(_ html: String) -> Double? {
         // ✅ Patterns exhaustifs pour capturer le maximum de formats de prix
+        // NOTE: L'ordre est IMPORTANT - les patterns les plus spécifiques doivent être en premier
         let patterns = [
-            // JSON-LD et structured data (très fiable)
-            "\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]*)",
-            "\"@type\":\\s*\"Offer\"[^}]*\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]*)",
+            // JSON-LD et structured data (très fiable) - EN PREMIER
+            "\"@type\":\\s*\"Offer\"[^}]*\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]{2})",
+            "\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]{2})\"",
 
-            // Balises HTML avec class/id "price"
-            "<span[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
-            "<div[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
-            "<p[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
-            "<span[^>]*id=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
+            // ✅ Amazon spécifique (classes CSS Amazon)
+            "<span[^>]*class=\"[^\"]*a-price-whole[^\"]*\"[^>]*>([0-9]+)[,\\.]?</span>",
+            "<span[^>]*class=\"[^\"]*a-offscreen[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+)[,\\.]([0-9]{2})",
+            "id=\"priceblock_ourprice\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "id=\"priceblock_dealprice\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
 
-            // Formats français avec €
-            "€\\s*([0-9]+[,\\.]?[0-9]*)",
-            "([0-9]+[,\\.]?[0-9]*)\\s*€",
-            "([0-9]+[,\\.]?[0-9]*)\\s*EUR",
+            // Microdata (très fiable)
+            "itemprop=\"price\"[^>]*content=\"([0-9]+[,\\.]?[0-9]{2})\"",
+            "content=\"([0-9]+[,\\.]?[0-9]{2})\"[^>]*itemprop=\"price\"",
 
-            // Formats e-commerce courants (Amazon, Fnac, etc.)
-            "data-price=\"([0-9]+[,\\.]?[0-9]*)\"",
-            "content=\"([0-9]+[,\\.]?[0-9]*)\"[^>]*property=\"product:price:amount\"",
-
-            // Microdata
-            "itemprop=\"price\"[^>]*content=\"([0-9]+[,\\.]?[0-9]*)\"",
-            "content=\"([0-9]+[,\\.]?[0-9]*)\"[^>]*itemprop=\"price\"",
+            // Attributs data (e-commerce)
+            "data-price=\"([0-9]+[,\\.]?[0-9]{2})\"",
+            "data-a-price=\"([0-9]+[,\\.]?[0-9]{2})\"",
+            "content=\"([0-9]+[,\\.]?[0-9]{2})\"[^>]*property=\"product:price:amount\"",
 
             // Classes spécifiques sites français
-            "class=\"[^\"]*prix[^\"]*\"[^>]*>\\s*([0-9]+[,\\.]?[0-9]*)",
-            "class=\"[^\"]*montant[^\"]*\"[^>]*>\\s*([0-9]+[,\\.]?[0-9]*)"
+            "class=\"[^\"]*prix[^\"]*principal[^\"]*\"[^>]*>\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "class=\"[^\"]*price[^\"]*product[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "class=\"[^\"]*product[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+
+            // Balises HTML génériques avec "price" (moins spécifiques, donc à la fin)
+            "<span[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "<div[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "<p[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "<span[^>]*id=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]{2})",
+
+            // Formats français génériques (symbole € - très large, donc tout à la fin)
+            "€\\s*([0-9]+[,\\.]?[0-9]{2})",
+            "([0-9]+[,\\.]?[0-9]{2})\\s*€",
+            "([0-9]+[,\\.]?[0-9]{2})\\s*EUR"
         ]
 
         // ✅ Essayer chaque pattern et retourner le premier prix valide trouvé
@@ -374,6 +383,7 @@ class ProductMetadataFetcher: ObservableObject {
     }
 
     /// Helper pour extraire le premier prix valide avec un pattern donné
+    /// ✅ AMÉLIORATION: Retourne le prix LE PLUS ÉLEVÉ trouvé (le vrai prix produit est généralement > frais de port)
     private func extractFirstPrice(from html: String, pattern: String) -> Double? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
             return nil
@@ -382,24 +392,45 @@ class ProductMetadataFetcher: ObservableObject {
         let nsString = html as NSString
         let range = NSRange(location: 0, length: nsString.length)
 
-        // ✅ Trouver TOUTES les correspondances (pas juste la première)
+        // ✅ Trouver TOUTES les correspondances
         let matches = regex.matches(in: html, options: [], range: range)
+
+        var validPrices: [Double] = []
 
         for match in matches {
             if match.numberOfRanges > 1 {
                 let priceRange = match.range(at: 1)
                 if let swiftRange = Range(priceRange, in: html) {
-                    let priceString = String(html[swiftRange])
+                    var priceString = String(html[swiftRange])
                         .replacingOccurrences(of: ",", with: ".")
                         .replacingOccurrences(of: " ", with: "")
+                        .replacingOccurrences(of: "\u{00A0}", with: "") // Espace insécable
                         .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    // ✅ Vérifier que c'est un prix réaliste (entre 0.01 et 100000 €)
-                    if let price = Double(priceString), price >= 0.01 && price <= 100000 {
-                        return price
+                    // Si pattern Amazon avec 2 groupes de capture (partie entière + décimales)
+                    if match.numberOfRanges > 2 {
+                        let decimalRange = match.range(at: 2)
+                        if let decimalSwiftRange = Range(decimalRange, in: html) {
+                            let decimalPart = String(html[decimalSwiftRange])
+                            priceString = "\(priceString).\(decimalPart)"
+                        }
+                    }
+
+                    // ✅ Vérifier que c'est un prix réaliste (entre 1€ et 100000€)
+                    // NOTE: Minimum 1€ pour éviter les frais de port (souvent < 10€)
+                    if let price = Double(priceString), price >= 1.0 && price <= 100000 {
+                        validPrices.append(price)
                     }
                 }
             }
+        }
+
+        // ✅ STRATÉGIE: Retourner le prix LE PLUS ÉLEVÉ
+        // Raison: Le prix du produit est généralement le plus élevé de la page
+        // (les autres prix sont souvent: frais de port, prix barré ancien, etc.)
+        if let maxPrice = validPrices.max() {
+            print("🎯 Prix sélectionné: \(maxPrice)€ parmi \(validPrices.count) prix trouvés: \(validPrices)")
+            return maxPrice
         }
 
         return nil
