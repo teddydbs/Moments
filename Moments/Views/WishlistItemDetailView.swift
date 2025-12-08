@@ -34,16 +34,31 @@ struct WishlistItemDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Icône catégorie
+                    // ✅ Image du produit si disponible, sinon icône catégorie
                     VStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(MomentsTheme.primaryGradient.opacity(0.2))
+                        if let imageData = wishlistItem.image,
+                           let uiImage = UIImage(data: imageData) {
+                            // Image du produit récupérée automatiquement
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFill()
                                 .frame(width: 120, height: 120)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle()
+                                        .stroke(MomentsTheme.primaryGradient, lineWidth: 3)
+                                )
+                        } else {
+                            // Fallback: icône de catégorie
+                            ZStack {
+                                Circle()
+                                    .fill(MomentsTheme.primaryGradient.opacity(0.2))
+                                    .frame(width: 120, height: 120)
 
-                            Image(systemName: wishlistItem.category.icon)
-                                .font(.system(size: 50))
-                                .gradientIcon()
+                                Image(systemName: wishlistItem.category.icon)
+                                    .font(.system(size: 50))
+                                    .gradientIcon()
+                            }
                         }
 
                         Text(wishlistItem.title)
