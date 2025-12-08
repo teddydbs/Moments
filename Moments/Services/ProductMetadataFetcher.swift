@@ -60,15 +60,8 @@ class ProductMetadataFetcher: ObservableObject {
         productMetadata.title = extractOpenGraphTag(from: html, property: "og:title") ?? extractOpenGraphTag(from: html, property: "twitter:title")
         print("📝 Titre extrait: \(productMetadata.title ?? "nil")")
 
-        // ✅ ÉTAPE 3: Extraire l'image Open Graph (meilleure que LinkPresentation)
-        if let imageURL = extractOpenGraphTag(from: html, property: "og:image") ?? extractOpenGraphTag(from: html, property: "twitter:image") {
-            print("🖼️ URL image Open Graph: \(imageURL)")
-            // Gérer les URLs relatives
-            let fullImageURL = makeAbsoluteURL(imageURL, baseURL: url)
-            productMetadata.imageData = await downloadImage(from: fullImageURL)
-        } else {
-            print("❌ Pas d'image Open Graph trouvée")
-        }
+        // ✅ ÉTAPE 3: Extraire l'image avec plusieurs stratégies
+        productMetadata.imageData = await extractProductImage(from: html, baseURL: url)
 
         // ✅ ÉTAPE 4: Extraire le prix (Open Graph puis HTML)
         if let priceString = extractOpenGraphTag(from: html, property: "og:price:amount") ?? extractOpenGraphTag(from: html, property: "product:price:amount") {
@@ -175,6 +168,134 @@ class ProductMetadataFetcher: ObservableObject {
         }
     }
 
+    /// Extrait l'image du produit avec plusieurs stratégies de fallback
+    /// - Parameters:
+    ///   - html: Le HTML de la page
+    ///   - baseURL: L'URL de base pour les liens relatifs
+    /// - Returns: Les données de l'image ou nil
+    private func extractProductImage(from html: String, baseURL: URL) async -> Data? {
+        // ✅ STRATÉGIE 1: Open Graph (og:image) - Le plus fiable
+        if let ogImageURL = extractOpenGraphTag(from: html, property: "og:image") {
+            print("🖼️ Image Open Graph trouvée: \(ogImageURL)")
+            let fullURL = makeAbsoluteURL(ogImageURL, baseURL: baseURL)
+            if let imageData = await downloadImage(from: fullURL) {
+                print("✅ Image Open Graph téléchargée")
+                return imageData
+            }
+        }
+
+        // ✅ STRATÉGIE 2: Twitter Card (twitter:image)
+        if let twitterImageURL = extractOpenGraphTag(from: html, property: "twitter:image") {
+            print("🖼️ Image Twitter Card trouvée: \(twitterImageURL)")
+            let fullURL = makeAbsoluteURL(twitterImageURL, baseURL: baseURL)
+            if let imageData = await downloadImage(from: fullURL) {
+                print("✅ Image Twitter Card téléchargée")
+                return imageData
+            }
+        }
+
+        // ✅ STRATÉGIE 3: Balise meta avec itemprop="image"
+        if let micropDataImageURL = extractImageFromMicrodata(html: html) {
+            print("🖼️ Image Microdata trouvée: \(micropDataImageURL)")
+            let fullURL = makeAbsoluteURL(micropDataImageURL, baseURL: baseURL)
+            if let imageData = await downloadImage(from: fullURL) {
+                print("✅ Image Microdata téléchargée")
+                return imageData
+            }
+        }
+
+        // ✅ STRATÉGIE 4: Chercher dans le JSON-LD (structured data)
+        if let jsonLDImageURL = extractImageFromJSONLD(html: html) {
+            print("🖼️ Image JSON-LD trouvée: \(jsonLDImageURL)")
+            let fullURL = makeAbsoluteURL(jsonLDImageURL, baseURL: baseURL)
+            if let imageData = await downloadImage(from: fullURL) {
+                print("✅ Image JSON-LD téléchargée")
+                return imageData
+            }
+        }
+
+        // ✅ STRATÉGIE 5: Chercher les balises <img> avec des classes spécifiques
+        if let productImageURL = extractImageFromImgTag(html: html) {
+            print("🖼️ Image <img> trouvée: \(productImageURL)")
+            let fullURL = makeAbsoluteURL(productImageURL, baseURL: baseURL)
+            if let imageData = await downloadImage(from: fullURL) {
+                print("✅ Image <img> téléchargée")
+                return imageData
+            }
+        }
+
+        print("❌ Aucune image trouvée avec les stratégies de scraping")
+        return nil
+    }
+
+    /// Extrait l'URL de l'image depuis les microdata (itemprop="image")
+    private func extractImageFromMicrodata(html: String) -> String? {
+        let patterns = [
+            "itemprop=\"image\"[^>]*content=\"([^\"]+)\"",
+            "content=\"([^\"]+)\"[^>]*itemprop=\"image\"",
+            "itemprop=\"image\"[^>]*src=\"([^\"]+)\"",
+            "src=\"([^\"]+)\"[^>]*itemprop=\"image\""
+        ]
+
+        for pattern in patterns {
+            if let url = extractFirstMatch(from: html, pattern: pattern) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// Extrait l'URL de l'image depuis le JSON-LD
+    private func extractImageFromJSONLD(html: String) -> String? {
+        // Chercher le bloc <script type="application/ld+json">
+        let jsonLDPattern = "<script[^>]*type=\"application/ld\\+json\"[^>]*>([^<]+)</script>"
+
+        guard let regex = try? NSRegularExpression(pattern: jsonLDPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+              let match = regex.firstMatch(in: html, options: [], range: NSRange(html.startIndex..., in: html)),
+              match.numberOfRanges > 1,
+              let jsonRange = Range(match.range(at: 1), in: html) else {
+            return nil
+        }
+
+        let jsonString = String(html[jsonRange])
+
+        // Chercher "image": "URL" dans le JSON
+        let imagePattern = "\"image\"\\s*:\\s*\"([^\"]+)\""
+        return extractFirstMatch(from: jsonString, pattern: imagePattern)
+    }
+
+    /// Extrait l'URL de l'image depuis les balises <img>
+    private func extractImageFromImgTag(html: String) -> String? {
+        // Chercher les <img> avec des classes spécifiques aux produits
+        let patterns = [
+            "<img[^>]*class=\"[^\"]*product[^\"]*\"[^>]*src=\"([^\"]+)\"",
+            "<img[^>]*class=\"[^\"]*main[^\"]*image[^\"]*\"[^>]*src=\"([^\"]+)\"",
+            "<img[^>]*id=\"[^\"]*product[^\"]*image[^\"]*\"[^>]*src=\"([^\"]+)\"",
+            "<img[^>]*data-src=\"([^\"]+)\"[^>]*class=\"[^\"]*product[^\"]*\"",
+            // Lazy loading images
+            "<img[^>]*data-lazy-src=\"([^\"]+)\""
+        ]
+
+        for pattern in patterns {
+            if let url = extractFirstMatch(from: html, pattern: pattern) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// Helper pour extraire la première correspondance d'un pattern regex
+    private func extractFirstMatch(from text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+              let match = regex.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges > 1,
+              let matchRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+
+        return String(text[matchRange])
+    }
+
     /// Extrait une balise Open Graph depuis le HTML
     private func extractOpenGraphTag(from html: String, property: String) -> String? {
         // Pattern pour <meta property="og:title" content="...">
@@ -210,27 +331,71 @@ class ProductMetadataFetcher: ObservableObject {
 
     /// Extrait le prix depuis le HTML (fallback si pas d'Open Graph)
     private func extractPriceFromHTML(_ html: String) -> Double? {
-        // Patterns courants pour les prix
+        // ✅ Patterns exhaustifs pour capturer le maximum de formats de prix
         let patterns = [
-            "<span[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>.*?([0-9]+[,\\.]?[0-9]*)",  // class="price"
-            "<div[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>.*?([0-9]+[,\\.]?[0-9]*)",   // div.price
-            "\"price\":\\s*\"?([0-9]+\\.?[0-9]*)",  // JSON {"price": "99.99"}
-            "€\\s*([0-9]+[,\\.]?[0-9]*)",           // 99,99 €
-            "([0-9]+[,\\.]?[0-9]*)\\s*€"            // € 99,99
+            // JSON-LD et structured data (très fiable)
+            "\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]*)",
+            "\"@type\":\\s*\"Offer\"[^}]*\"price\":\\s*\"?([0-9]+[,\\.]?[0-9]*)",
+
+            // Balises HTML avec class/id "price"
+            "<span[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
+            "<div[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
+            "<p[^>]*class=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
+            "<span[^>]*id=\"[^\"]*price[^\"]*\"[^>]*>\\s*€?\\s*([0-9]+[,\\.]?[0-9]*)",
+
+            // Formats français avec €
+            "€\\s*([0-9]+[,\\.]?[0-9]*)",
+            "([0-9]+[,\\.]?[0-9]*)\\s*€",
+            "([0-9]+[,\\.]?[0-9]*)\\s*EUR",
+
+            // Formats e-commerce courants (Amazon, Fnac, etc.)
+            "data-price=\"([0-9]+[,\\.]?[0-9]*)\"",
+            "content=\"([0-9]+[,\\.]?[0-9]*)\"[^>]*property=\"product:price:amount\"",
+
+            // Microdata
+            "itemprop=\"price\"[^>]*content=\"([0-9]+[,\\.]?[0-9]*)\"",
+            "content=\"([0-9]+[,\\.]?[0-9]*)\"[^>]*itemprop=\"price\"",
+
+            // Classes spécifiques sites français
+            "class=\"[^\"]*prix[^\"]*\"[^>]*>\\s*([0-9]+[,\\.]?[0-9]*)",
+            "class=\"[^\"]*montant[^\"]*\"[^>]*>\\s*([0-9]+[,\\.]?[0-9]*)"
         ]
 
+        // ✅ Essayer chaque pattern et retourner le premier prix valide trouvé
         for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
-               let match = regex.firstMatch(in: html, options: [], range: NSRange(html.startIndex..., in: html)),
-               match.numberOfRanges > 1 {
+            if let price = extractFirstPrice(from: html, pattern: pattern) {
+                print("💰 Prix trouvé avec pattern: \(pattern)")
+                return price
+            }
+        }
 
+        print("❌ Aucun prix trouvé dans le HTML")
+        return nil
+    }
+
+    /// Helper pour extraire le premier prix valide avec un pattern donné
+    private func extractFirstPrice(from html: String, pattern: String) -> Double? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return nil
+        }
+
+        let nsString = html as NSString
+        let range = NSRange(location: 0, length: nsString.length)
+
+        // ✅ Trouver TOUTES les correspondances (pas juste la première)
+        let matches = regex.matches(in: html, options: [], range: range)
+
+        for match in matches {
+            if match.numberOfRanges > 1 {
                 let priceRange = match.range(at: 1)
-                if let range = Range(priceRange, in: html) {
-                    let priceString = String(html[range])
+                if let swiftRange = Range(priceRange, in: html) {
+                    let priceString = String(html[swiftRange])
                         .replacingOccurrences(of: ",", with: ".")
-                        .trimmingCharacters(in: .whitespaces)
+                        .replacingOccurrences(of: " ", with: "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    if let price = Double(priceString), price > 0 && price < 1000000 {
+                    // ✅ Vérifier que c'est un prix réaliste (entre 0.01 et 100000 €)
+                    if let price = Double(priceString), price >= 0.01 && price <= 100000 {
                         return price
                     }
                 }
