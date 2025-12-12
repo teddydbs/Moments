@@ -47,8 +47,14 @@ struct ParticipantsManagementView: View {
                             Spacer()
                         }
                         .padding(.vertical, 4)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteParticipant(participant)
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
+                            }
+                        }
                     }
-                    .onDelete(perform: deleteParticipants)
                 }
 
                 Section {
@@ -128,10 +134,13 @@ struct ParticipantsManagementView: View {
         newParticipantName = ""
     }
 
-    private func deleteParticipants(at offsets: IndexSet) {
-        for index in offsets {
-            let participant = event.participants[index]
-            modelContext.delete(participant)
+    private func deleteParticipant(_ participant: Participant) {
+        modelContext.delete(participant)
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("❌ Erreur lors de la suppression du participant: \(error)")
         }
     }
 

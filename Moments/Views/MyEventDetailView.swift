@@ -18,6 +18,7 @@ struct MyEventDetailView: View {
     @State private var showingEditEvent = false
     @State private var showingInvitationManagement = false
     @State private var showingAddGift = false
+    @State private var showingPhotosGallery = false
 
     // Pour la carte
     @State private var mapPosition: MapCameraPosition = .automatic
@@ -54,132 +55,137 @@ struct MyEventDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    // En-tête avec icône
-                    VStack(spacing: 16) {
-                        // Icône
-                        ZStack {
-                            Circle()
-                                .fill(MomentsTheme.primaryGradient.opacity(0.2))
-                                .frame(width: 120, height: 120)
-
-                            Image(systemName: myEvent.type.icon)
-                                .font(.system(size: 50))
-                                .gradientIcon()
-                        }
-
-                        // Titre
-                        Text(myEvent.title)
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.center)
-
-                        // Type
-                        Text(myEvent.type.rawValue)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                VStack(spacing: 0) {
+                    // ✅ Photo de couverture (si disponible)
+                    if let coverData = myEvent.coverPhoto,
+                       let coverImage = UIImage(data: coverData) {
+                        Image(uiImage: coverImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 200)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
                     }
-                    .padding(.top, 20)
 
-                    // Carte date
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "calendar")
-                                .font(.title2)
-                                .gradientIcon()
+                    VStack(spacing: 24) {
+                        // En-tête avec photo de profil ou icône
+                        VStack(spacing: 16) {
+                            // ✅ Photo de profil (si disponible) ou icône SF Symbol
+                            ZStack {
+                                if let profileData = myEvent.profilePhoto,
+                                   let profileImage = UIImage(data: profileData) {
+                                    // ❓ POURQUOI: Afficher la photo de profil de l'événement
+                                    Image(uiImage: profileImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 120, height: 120)
+                                        .clipShape(Circle())
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color(.systemBackground), lineWidth: 4)
+                                        )
+                                        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                                } else {
+                                    // ❓ POURQUOI: Fallback sur l'icône SF Symbol si pas de photo
+                                    Circle()
+                                        .fill(MomentsTheme.primaryGradient.opacity(0.2))
+                                        .frame(width: 120, height: 120)
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(dateFormatter.string(from: myEvent.date))
-                                    .font(.headline)
-
-                                if let time = myEvent.time {
-                                    Text("À \(timeFormatter.string(from: time))")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
+                                    Image(systemName: myEvent.type.icon)
+                                        .font(.system(size: 50))
+                                        .gradientIcon()
                                 }
                             }
+                            // ⚠️ ATTENTION: Décaler vers le haut si photo de couverture
+                            .offset(y: myEvent.coverPhoto != nil ? -60 : 0)
 
-                            Spacer()
+                            // Titre
+                            Text(myEvent.title)
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, myEvent.coverPhoto != nil ? -40 : 0)
 
-                            VStack(alignment: .trailing, spacing: 4) {
-                                Text(daysText)
-                                    .font(.headline)
-                                    .foregroundStyle(MomentsTheme.primaryGradient)
+                            // Type
+                            Text(myEvent.type.rawValue)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.top, myEvent.coverPhoto != nil ? 0 : 20)
+
+                        // Carte date
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "calendar")
+                                    .font(.title2)
+                                    .gradientIcon()
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(dateFormatter.string(from: myEvent.date))
+                                        .font(.headline)
+
+                                    if let time = myEvent.time {
+                                        Text("À \(timeFormatter.string(from: time))")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text(daysText)
+                                        .font(.headline)
+                                        .foregroundStyle(MomentsTheme.primaryGradient)
+                                }
                             }
                         }
-                    }
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(.systemBackground))
-                            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
-                    )
-                    .padding(.horizontal)
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                        )
+                        .padding(.horizontal)
 
-                    // Lieu
-                    if myEvent.location != nil || myEvent.locationAddress != nil {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Lieu")
-                                .font(.headline)
-                                .padding(.horizontal)
-
+                        // Lieu
+                        if myEvent.location != nil || myEvent.locationAddress != nil {
                             VStack(alignment: .leading, spacing: 12) {
-                                if let location = myEvent.location {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "mappin.circle.fill")
-                                            .foregroundStyle(MomentsTheme.primaryGradient)
+                                Text("Lieu")
+                                    .font(.headline)
+                                    .padding(.horizontal)
 
-                                        Text(location)
-                                            .font(.body)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    if let location = myEvent.location {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "mappin.circle.fill")
+                                                .foregroundStyle(MomentsTheme.primaryGradient)
+
+                                            Text(location)
+                                                .font(.body)
+                                        }
+                                    }
+
+                                    if let address = myEvent.locationAddress {
+                                        Text(address)
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .padding(.leading, 34)
+                                    }
+
+                                    // ✅ Carte interactive
+                                    if let coordinate = locationCoordinate {
+                                        Map(position: $mapPosition, interactionModes: []) {
+                                            Marker(myEvent.location ?? "Lieu", coordinate: coordinate)
+                                        }
+                                        .frame(height: 200)
+                                        .cornerRadius(12)
+                                        .onTapGesture {
+                                            // Ouvrir Apple Maps avec les coordonnées
+                                            openInMaps(coordinate: coordinate)
+                                        }
                                     }
                                 }
-
-                                if let address = myEvent.locationAddress {
-                                    Text(address)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .padding(.leading, 34)
-                                }
-
-                                // ✅ Carte interactive
-                                if let coordinate = locationCoordinate {
-                                    Map(position: $mapPosition, interactionModes: []) {
-                                        Marker(myEvent.location ?? "Lieu", coordinate: coordinate)
-                                    }
-                                    .frame(height: 200)
-                                    .cornerRadius(12)
-                                    .onTapGesture {
-                                        // Ouvrir Apple Maps avec les coordonnées
-                                        openInMaps(coordinate: coordinate)
-                                    }
-                                }
-                            }
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.systemBackground))
-                                    .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
-                            )
-                            .padding(.horizontal)
-                        }
-                        .task {
-                            // ✅ Géocoder l'adresse au chargement
-                            if let address = myEvent.locationAddress {
-                                await geocodeAddress(address)
-                            }
-                        }
-                    }
-
-                    // Description
-                    if let description = myEvent.eventDescription, !description.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Description")
-                                .font(.headline)
-                                .padding(.horizontal)
-
-                            Text(description)
-                                .font(.body)
                                 .padding()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(
@@ -188,132 +194,222 @@ struct MyEventDetailView: View {
                                         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
                                 )
                                 .padding(.horizontal)
-                        }
-                    }
-
-                    // Invitations
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Invitations")
-                                .font(.headline)
-
-                            Spacer()
-
-                            Button {
-                                showingInvitationManagement = true
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text("\(myEvent.totalInvitations)")
-                                        .font(.caption)
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2)
+                            }
+                            .task {
+                                // ✅ Géocoder l'adresse au chargement
+                                if let address = myEvent.locationAddress {
+                                    await geocodeAddress(address)
                                 }
-                                .foregroundStyle(MomentsTheme.primaryGradient)
                             }
                         }
-                        .padding(.horizontal)
 
-                        if let invitations = myEvent.invitations, !invitations.isEmpty {
-                            VStack(spacing: 8) {
-                                // Stats
-                                HStack(spacing: 16) {
-                                    StatBadge(
-                                        count: myEvent.acceptedCount,
-                                        label: "Accepté\(myEvent.acceptedCount > 1 ? "s" : "")",
-                                        color: .green
+                        // Description
+                        if let description = myEvent.eventDescription, !description.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Description")
+                                    .font(.headline)
+                                    .padding(.horizontal)
+
+                                Text(description)
+                                    .font(.body)
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(.systemBackground))
+                                            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
                                     )
-
-                                    StatBadge(
-                                        count: myEvent.pendingCount,
-                                        label: "En attente",
-                                        color: .orange
-                                    )
-
-                                    StatBadge(
-                                        count: myEvent.declinedCount,
-                                        label: "Refusé\(myEvent.declinedCount > 1 ? "s" : "")",
-                                        color: .red
-                                    )
-                                }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(.systemBackground))
-                                        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
-                                )
-
-                                // Liste des invitations (simplifiée)
-                                ForEach(invitations) { invitation in
-                                    InvitationRowView(invitation: invitation)
-                                }
+                                    .padding(.horizontal)
                             }
-                            .padding(.horizontal)
-                        } else {
-                            VStack(spacing: 12) {
-                                Image(systemName: "person.2")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(MomentsTheme.primaryGradient.opacity(0.5))
+                        }
 
-                                Text("Aucune invitation envoyée")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                        // Invitations
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Invitations")
+                                    .font(.headline)
+
+                                Spacer()
 
                                 Button {
                                     showingInvitationManagement = true
                                 } label: {
-                                    Label("Inviter quelqu'un", systemImage: "plus.circle.fill")
-                                }
-                                .buttonStyle(MomentsTheme.PrimaryButtonStyle())
-                                .padding(.horizontal)
-                            }
-                            .padding(.vertical, 40)
-                        }
-                    }
-
-                    // Ma wishlist pour cet événement
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Ma wishlist")
-                                .font(.headline)
-
-                            Spacer()
-
-                            Text("\(myEvent.wishlistCount) \(myEvent.wishlistCount <= 1 ? "cadeau" : "cadeaux")")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal)
-
-                        if let wishlistItems = myEvent.wishlistItems, !wishlistItems.isEmpty {
-                            VStack(spacing: 12) {
-                                ForEach(wishlistItems) { item in
-                                    WishlistItemRowView(item: item)
+                                    HStack(spacing: 4) {
+                                        Text("\(myEvent.totalInvitations)")
+                                            .font(.caption)
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2)
+                                    }
+                                    .foregroundStyle(MomentsTheme.primaryGradient)
                                 }
                             }
                             .padding(.horizontal)
-                        } else {
-                            VStack(spacing: 12) {
-                                Image(systemName: "gift")
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(MomentsTheme.primaryGradient.opacity(0.5))
 
-                                Text("Aucun cadeau dans votre wishlist")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                            if let invitations = myEvent.invitations, !invitations.isEmpty {
+                                VStack(spacing: 8) {
+                                    // Stats
+                                    HStack(spacing: 16) {
+                                        StatBadge(
+                                            count: myEvent.acceptedCount,
+                                            label: "Accepté\(myEvent.acceptedCount > 1 ? "s" : "")",
+                                            color: .green
+                                        )
+
+                                        StatBadge(
+                                            count: myEvent.pendingCount,
+                                            label: "En attente",
+                                            color: .orange
+                                        )
+
+                                        StatBadge(
+                                            count: myEvent.declinedCount,
+                                            label: "Refusé\(myEvent.declinedCount > 1 ? "s" : "")",
+                                            color: .red
+                                        )
+                                    }
+                                    .padding()
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(.systemBackground))
+                                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                                    )
+
+                                    // Liste des invitations (simplifiée)
+                                    ForEach(invitations) { invitation in
+                                        InvitationRowView(invitation: invitation)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            } else {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "person.2")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(MomentsTheme.primaryGradient.opacity(0.5))
+
+                                    Text("Aucune invitation envoyée")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+
+                                    Button {
+                                        showingInvitationManagement = true
+                                    } label: {
+                                        Label("Inviter quelqu'un", systemImage: "plus.circle.fill")
+                                    }
+                                    .buttonStyle(MomentsTheme.PrimaryButtonStyle())
+                                    .padding(.horizontal)
+                                }
+                                .padding(.vertical, 40)
+                            }
+                        }
+
+                        // Album photo
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Album photo")
+                                    .font(.headline)
+
+                                Spacer()
 
                                 Button {
-                                    showingAddGift = true
+                                    showingPhotosGallery = true
                                 } label: {
-                                    Label("Ajouter un cadeau", systemImage: "plus.circle.fill")
+                                    HStack(spacing: 4) {
+                                        Text("\(myEvent.photosCount)")
+                                            .font(.caption)
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2)
+                                    }
+                                    .foregroundStyle(MomentsTheme.primaryGradient)
                                 }
-                                .buttonStyle(MomentsTheme.PrimaryButtonStyle())
-                                .padding(.horizontal)
                             }
-                            .padding(.vertical, 40)
-                        }
-                    }
+                            .padding(.horizontal)
 
-                    Spacer()
+                            if let photos = myEvent.eventPhotos, !photos.isEmpty {
+                                // ✅ Aperçu des 3 premières photos
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(photos.prefix(6)) { photo in
+                                            if let uiImage = UIImage(data: photo.imageData) {
+                                                Image(uiImage: uiImage)
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 120, height: 120)
+                                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                                    .onTapGesture {
+                                                        showingPhotosGallery = true
+                                                    }
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            } else {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "photo.on.rectangle.angled")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(MomentsTheme.primaryGradient.opacity(0.5))
+
+                                    Text("Aucune photo")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+
+                                    Button {
+                                        showingPhotosGallery = true
+                                    } label: {
+                                        Label("Ajouter des photos", systemImage: "plus.circle.fill")
+                                    }
+                                    .buttonStyle(MomentsTheme.PrimaryButtonStyle())
+                                    .padding(.horizontal)
+                                }
+                                .padding(.vertical, 40)
+                            }
+                        }
+
+                        // Ma wishlist pour cet événement
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Ma wishlist")
+                                    .font(.headline)
+
+                                Spacer()
+
+                                Text("\(myEvent.wishlistCount) \(myEvent.wishlistCount <= 1 ? "cadeau" : "cadeaux")")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal)
+
+                            if let wishlistItems = myEvent.wishlistItems, !wishlistItems.isEmpty {
+                                VStack(spacing: 12) {
+                                    ForEach(wishlistItems) { item in
+                                        WishlistItemRowView(item: item)
+                                    }
+                                }
+                                .padding(.horizontal)
+                            } else {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "gift")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(MomentsTheme.primaryGradient.opacity(0.5))
+
+                                    Text("Aucun cadeau dans votre wishlist")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+
+                                    Button {
+                                        showingAddGift = true
+                                    } label: {
+                                        Label("Ajouter un cadeau", systemImage: "plus.circle.fill")
+                                    }
+                                    .buttonStyle(MomentsTheme.PrimaryButtonStyle())
+                                    .padding(.horizontal)
+                                }
+                                .padding(.vertical, 40)
+                            }
+                        }
+
+                        Spacer()
+                    }
                 }
             }
             .background(
@@ -325,11 +421,21 @@ struct MyEventDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showingEditEvent = true
+                    Menu {
+                        // ✅ Option: Modifier l'événement
+                        Button {
+                            showingEditEvent = true
+                        } label: {
+                            Label("Modifier", systemImage: "pencil")
+                        }
+
+                        // ✅ Option: Partager l'événement
+                        ShareLink(item: shareMessage) {
+                            Label("Partager", systemImage: "square.and.arrow.up")
+                        }
                     } label: {
-                        Text("Modifier")
-                            .foregroundStyle(MomentsTheme.primaryGradient)
+                        Image(systemName: "ellipsis.circle")
+                            .gradientIcon()
                     }
                 }
 
@@ -348,6 +454,9 @@ struct MyEventDetailView: View {
             .sheet(isPresented: $showingAddGift) {
                 AddEditWishlistItemView(myEvent: myEvent, wishlistItem: nil)
             }
+            .sheet(isPresented: $showingPhotosGallery) {
+                EventPhotosGalleryView(myEvent: myEvent)
+            }
         }
     }
 
@@ -365,6 +474,17 @@ struct MyEventDetailView: View {
         mapItem.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
         ])
+    }
+
+    /// Retourne le message de partage formaté
+    private var shareMessage: String {
+        let deepLinkManager = DeepLinkManager.shared
+        return deepLinkManager.generateShareMessage(
+            eventTitle: myEvent.title,
+            eventDate: myEvent.date,
+            eventTime: myEvent.time,
+            eventId: myEvent.id
+        )
     }
 
     /// Géocode une adresse pour obtenir les coordonnées GPS

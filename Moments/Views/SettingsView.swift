@@ -64,7 +64,7 @@ struct SettingsView: View {
                 Section("Compte") {
                     if let user = authManager.currentUser {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(user.name)
+                            Text(user.displayName)
                                 .font(.headline)
                             Text(user.email)
                                 .font(.subheadline)
@@ -135,8 +135,10 @@ struct SettingsView: View {
             .alert("Déconnexion", isPresented: $showingLogoutAlert) {
                 Button("Annuler", role: .cancel) { }
                 Button("Se déconnecter", role: .destructive) {
-                    authManager.logout()
-                    dismiss()
+                    Task {
+                        await authManager.logout()
+                        dismiss()
+                    }
                 }
             } message: {
                 Text("Êtes-vous sûr de vouloir vous déconnecter ?")

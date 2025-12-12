@@ -50,7 +50,7 @@ class ScraperAPIManager {
 
         // ✅ ÉTAPE 2: Faire la requête HTTP
         var request = URLRequest(url: requestURL)
-        request.timeoutInterval = 30  // ScraperAPI peut prendre du temps (JavaScript rendering)
+        request.timeoutInterval = 60  // ScraperAPI peut prendre du temps (JavaScript rendering + images lazy-load)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 

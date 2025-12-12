@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Supabase
 
 struct AddEditWishlistItemView: View {
     @Environment(\.modelContext) private var modelContext
@@ -320,40 +321,85 @@ struct AddEditWishlistItemView: View {
         // ✅ Si pas de titre récupéré, utiliser un titre par défaut
         let finalTitle = title.isEmpty ? "Produit" : title
 
-        if let existingItem = wishlistItem {
-            // Mise à jour
-            existingItem.title = finalTitle
-            existingItem.itemDescription = itemDescription.isEmpty ? nil : itemDescription
-            existingItem.price = priceDouble
-            existingItem.url = url.isEmpty ? nil : url
-            existingItem.category = category
-            existingItem.priority = priority
-            existingItem.image = imageData
-            existingItem.updatedAt = Date()
-        } else {
-            // Création
-            let newItem = WishlistItem(
-                title: finalTitle,
-                itemDescription: itemDescription.isEmpty ? nil : itemDescription,
-                price: priceDouble,
-                url: url.isEmpty ? nil : url,
-                image: imageData,
-                category: category,
-                status: .wanted,
-                priority: priority,
-                contact: contact,
-                myEvent: myEvent
-            )
-            modelContext.insert(newItem)
-        }
+        Task {
+            do {
+                if let existingItem = wishlistItem {
+                    // ✅ MISE À JOUR
+                    print("⚙️ Mise à jour de l'item: \(existingItem.title)")
 
-        // Sauvegarder
-        do {
-            try modelContext.save()
-            print("✅ Cadeau sauvegardé avec succès")
-            dismiss()
-        } catch {
-            print("❌ Erreur lors de la sauvegarde du cadeau: \(error)")
+                    // 1. Mettre à jour localement
+                    existingItem.title = finalTitle
+                    existingItem.itemDescription = itemDescription.isEmpty ? nil : itemDescription
+                    existingItem.price = priceDouble
+                    existingItem.url = url.isEmpty ? nil : url
+                    existingItem.category = category
+                    existingItem.priority = priority
+                    existingItem.image = imageData
+                    existingItem.updatedAt = Date()
+
+                    try modelContext.save()
+                    print("✅ Item mis à jour localement")
+
+                    // 2. Synchroniser avec Supabase (SEULEMENT pour wishlist personnelle)
+                    if existingItem.isMyWishlistItem, let session = try? await SupabaseManager.shared.client.auth.session {
+                        let userId = session.user.id
+
+                        let remoteItem = RemoteWishlistItem(from: existingItem, userId: userId)
+
+                        try await SupabaseManager.shared.client
+                            .from("wishlist_items")
+                            .update(remoteItem)
+                            .eq("id", value: existingItem.id.uuidString)
+                            .execute()
+
+                        print("✅ Item synchronisé avec Supabase")
+                    }
+
+                } else {
+                    // ✅ CRÉATION
+                    let newItem = WishlistItem(
+                        title: finalTitle,
+                        itemDescription: itemDescription.isEmpty ? nil : itemDescription,
+                        price: priceDouble,
+                        url: url.isEmpty ? nil : url,
+                        image: imageData,
+                        category: category,
+                        status: .wanted,
+                        priority: priority,
+                        contact: contact,
+                        myEvent: myEvent
+                    )
+
+                    // 1. Ajouter localement
+                    modelContext.insert(newItem)
+                    try modelContext.save()
+                    print("✅ Item créé localement")
+
+                    // 2. Synchroniser avec Supabase (SEULEMENT pour wishlist personnelle)
+                    if newItem.isMyWishlistItem, let session = try? await SupabaseManager.shared.client.auth.session {
+                        let userId = session.user.id
+
+                        let remoteItem = RemoteWishlistItem(from: newItem, userId: userId)
+
+                        try await SupabaseManager.shared.client
+                            .from("wishlist_items")
+                            .insert(remoteItem)
+                            .execute()
+
+                        print("✅ Item synchronisé avec Supabase")
+                    }
+                }
+
+                await MainActor.run {
+                    print("✅ Cadeau sauvegardé avec succès")
+                    dismiss()
+                }
+
+            } catch {
+                await MainActor.run {
+                    print("❌ Erreur lors de la sauvegarde du cadeau: \(error)")
+                }
+            }
         }
     }
 }

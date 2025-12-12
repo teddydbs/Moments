@@ -71,7 +71,8 @@ class ProductMetadataFetcher: ObservableObject {
         }
         */
 
-        // ✅ ÉTAPE 2: Télécharger le HTML de la page (pour les sites non-Amazon ou en fallback)
+        // ✅ ÉTAPE 2: Télécharger le HTML de la page
+        // ScraperAPI gère automatiquement les redirections Amazon
         guard let html = await downloadHTML(from: url) else {
             print("❌ Impossible de télécharger le HTML, fallback vers LinkPresentation")
             return await fallbackToLinkPresentation(url: url)
@@ -199,8 +200,36 @@ class ProductMetadataFetcher: ObservableObject {
         return baseURL.absoluteString + urlString
     }
 
+    /// Nettoie une URL en retirant les paramètres de tracking inutiles
+    private func cleanURL(_ urlString: String) -> String {
+        guard let url = URL(string: urlString),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return urlString
+        }
+
+        // Paramètres de tracking à retirer
+        let trackingParams = [
+            "oref", "Origin", "esl-k", "gclsrc", "gad_source", "gad_campaignid",
+            "storecode", "utm_source", "utm_medium", "utm_campaign", "utm_term",
+            "utm_content", "fbclid", "gclid", "msclkid", "_ga", "mc_cid", "mc_eid"
+        ]
+
+        // Retirer les paramètres de tracking
+        if let queryItems = components.queryItems {
+            components.queryItems = queryItems.filter { item in
+                !trackingParams.contains(item.name)
+            }
+            // Si aucun paramètre ne reste, retirer le "?"
+            if components.queryItems?.isEmpty == true {
+                components.queryItems = nil
+            }
+        }
+
+        return components.url?.absoluteString ?? urlString
+    }
+
     /// Télécharge le HTML d'une page web
-    /// ✅ Utilise ScraperAPI pour Amazon (avec JavaScript) si configuré
+    /// ✅ Utilise ScraperAPI (avec JavaScript) pour TOUS les sites si configuré
     private func downloadHTML(from url: URL) async -> String? {
         var finalURLString = url.absoluteString
 
@@ -213,18 +242,27 @@ class ProductMetadataFetcher: ObservableObject {
             }
         }
 
-        // ✅ ÉTAPE 2: Si c'est Amazon ET ScraperAPI est configuré, utiliser ScraperAPI
-        if (finalURLString.contains("amazon") || finalURLString.contains("amzn")) && ScraperAPIManager.shared.isConfigured {
-            print("🚀 Utilisation de ScraperAPI pour Amazon (avec JavaScript)")
+        // ✅ Nettoyer l'URL (retirer les paramètres de tracking)
+        let cleanedURL = cleanURL(finalURLString)
+        if cleanedURL != finalURLString {
+            print("🧹 URL nettoyée: \(cleanedURL)")
+            finalURLString = cleanedURL
+        }
+
+        // ✅ ÉTAPE 2: Utiliser ScraperAPI pour TOUS les sites si configuré
+        // Cela permet d'extraire les images lazy-loaded et le contenu JavaScript
+        if ScraperAPIManager.shared.isConfigured {
+            print("🚀 Utilisation de ScraperAPI (avec JavaScript) pour: \(finalURLString)")
             do {
                 return try await ScraperAPIManager.shared.fetchHTML(from: finalURLString)
             } catch {
-                print("⚠️ ScraperAPI échoué, fallback vers scraping classique")
+                print("⚠️ ScraperAPI échoué (\(error)), fallback vers scraping classique")
                 // Continue avec scraping classique en cas d'erreur
             }
         }
 
-        // Scraping classique (sans JavaScript)
+        // Scraping classique (sans JavaScript) - Fallback uniquement
+        print("📄 Scraping classique (sans JavaScript)")
         do {
             var request = URLRequest(url: url)
             request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
@@ -517,39 +555,53 @@ class ProductMetadataFetcher: ObservableObject {
     /// Extrait l'image principale Amazon (haute résolution)
     /// Amazon stocke les images dans des objets JavaScript
     private func extractAmazonMainImage(from html: String) -> String? {
-        // Patterns pour trouver l'image principale Amazon (par ordre de préférence)
-        let patterns = [
-            // 1. Image haute résolution dans colorImages (la meilleure qualité)
-            "\"hiRes\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+)\"",
+        // STRATÉGIE 1: Chercher dans 'colorImages' avec variant='MAIN' (image principale)
+        // C'est la plus fiable car Amazon indique explicitement quelle image est la principale
+        if let mainImageRange = html.range(of: "\"variant\"\\s*:\\s*\"MAIN\"[^}]*\"hiRes\"\\s*:\\s*\"(https://[^\"]+)\"", options: .regularExpression),
+           let regex = try? NSRegularExpression(pattern: "\"variant\"\\s*:\\s*\"MAIN\"[^}]*\"hiRes\"\\s*:\\s*\"(https://[^\"]+)\"", options: []),
+           let match = regex.firstMatch(in: html, range: NSRange(mainImageRange, in: html)),
+           match.numberOfRanges > 1,
+           let imageRange = Range(match.range(at: 1), in: html) {
 
-            // 2. Image large dans imageGalleryData
-            "\"large\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+\\.jpg)\"",
+            let imageURL = String(html[imageRange]).replacingOccurrences(of: "\\/", with: "/")
+            print("🎯 Image Amazon MAIN variant trouvée: \(imageURL.prefix(80))...")
+            return imageURL
+        }
 
-            // 3. Meta tag og:image
-            "<meta\\s+property=\"og:image\"\\s+content=\"(https://m\\.media-amazon\\.com/images/I/[^\"]+)\"",
+        // STRATÉGIE 2: Chercher le premier 'hiRes' dans colorImages
+        if let hiResRange = html.range(of: "\"colorImages\"[^\\[]*\\[[^\\]]*\"hiRes\"\\s*:\\s*\"(https://[^\"]+)\"", options: .regularExpression),
+           let regex = try? NSRegularExpression(pattern: "\"hiRes\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+)\"", options: []),
+           let match = regex.firstMatch(in: html, range: NSRange(hiResRange, in: html)),
+           match.numberOfRanges > 1,
+           let imageRange = Range(match.range(at: 1), in: html) {
 
-            // 4. Image dans landingImage
-            "\"landingImageUrl\"\\s*:\\s*\"(https://[^\"]+)\"",
+            let imageURL = String(html[imageRange]).replacingOccurrences(of: "\\/", with: "/")
+            print("🎯 Image Amazon hiRes trouvée: \(imageURL.prefix(80))...")
+            return imageURL
+        }
 
-            // 5. Pattern générique pour toute image Amazon haute résolution
-            "(https://m\\.media-amazon\\.com/images/I/[A-Za-z0-9+_-]+\\._AC_SL1500_\\.jpg)",
-            "(https://m\\.media-amazon\\.com/images/I/[A-Za-z0-9+_-]+\\._AC_SX\\d+_\\.jpg)",
-        ]
+        // STRATÉGIE 3: Meta tag og:image (fallback fiable)
+        if let ogImageRange = html.range(of: "<meta\\s+property=\"og:image\"\\s+content=\"(https://[^\"]+)\"", options: .regularExpression),
+           let regex = try? NSRegularExpression(pattern: "<meta\\s+property=\"og:image\"\\s+content=\"(https://[^\"]+)\"", options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: html, range: NSRange(ogImageRange, in: html)),
+           match.numberOfRanges > 1,
+           let imageRange = Range(match.range(at: 1), in: html) {
 
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-               let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)),
-               match.numberOfRanges > 1,
-               let imageRange = Range(match.range(at: 1), in: html) {
+            let imageURL = String(html[imageRange])
+            print("🎯 Image Amazon og:image trouvée: \(imageURL.prefix(80))...")
+            return imageURL
+        }
 
-                var imageURL = String(html[imageRange])
+        // STRATÉGIE 4: Image 'large' dans imageGalleryData
+        if let largeRange = html.range(of: "\"large\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+\\.jpg)\"", options: .regularExpression),
+           let regex = try? NSRegularExpression(pattern: "\"large\"\\s*:\\s*\"(https://m\\.media-amazon\\.com/images/I/[^\"]+\\.jpg)\"", options: []),
+           let match = regex.firstMatch(in: html, range: NSRange(largeRange, in: html)),
+           match.numberOfRanges > 1,
+           let imageRange = Range(match.range(at: 1), in: html) {
 
-                // Nettoyer l'URL (parfois il y a des échappements)
-                imageURL = imageURL.replacingOccurrences(of: "\\/", with: "/")
-
-                print("🎯 Image Amazon extraite avec pattern: \(pattern.prefix(60))...")
-                return imageURL
-            }
+            let imageURL = String(html[imageRange]).replacingOccurrences(of: "\\/", with: "/")
+            print("🎯 Image Amazon large trouvée: \(imageURL.prefix(80))...")
+            return imageURL
         }
 
         print("❌ Aucune image Amazon haute résolution trouvée")

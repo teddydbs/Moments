@@ -7,7 +7,25 @@
 		<key>Moments.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+		<key>MomentsShare.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
 			<integer>0</integer>
+		</dict>
+	</dict>
+	<key>SuppressBuildableAutocreation</key>
+	<dict>
+		<key>9FC6C7282EE1EA8A000803FA</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
+		<key>9FE0E5DE2EE7206F0041BBC2</key>
+		<dict>
+			<key>primary</key>
+			<true/>
 		</dict>
 	</dict>
 </dict>

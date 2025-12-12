@@ -28,8 +28,14 @@ struct GiftIdeasManagementView: View {
                 } else {
                     ForEach(event.giftIdeas) { giftIdea in
                         GiftIdeaRow(giftIdea: giftIdea)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    deleteGiftIdea(giftIdea)
+                                } label: {
+                                    Label("Supprimer", systemImage: "trash")
+                                }
+                            }
                     }
-                    .onDelete(perform: deleteGiftIdeas)
                 }
             }
             .navigationTitle("Idées cadeaux")
@@ -55,10 +61,13 @@ struct GiftIdeasManagementView: View {
         }
     }
 
-    private func deleteGiftIdeas(at offsets: IndexSet) {
-        for index in offsets {
-            let giftIdea = event.giftIdeas[index]
-            modelContext.delete(giftIdea)
+    private func deleteGiftIdea(_ giftIdea: GiftIdea) {
+        modelContext.delete(giftIdea)
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("❌ Erreur lors de la suppression de l'idée cadeau: \(error)")
         }
     }
 }

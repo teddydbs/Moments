@@ -113,25 +113,26 @@ struct EventsView: View {
             if !upcomingEvents.isEmpty {
                 Section {
                     ForEach(upcomingEvents) { event in
-                        MyEventRowView(event: event)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedEvent = event
+                        Button {
+                            selectedEvent = event
+                        } label: {
+                            MyEventRowView(event: event)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteEvent(event)
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deleteEvent(event)
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
 
-                                Button {
-                                    selectedEvent = event
-                                } label: {
-                                    Label("Modifier", systemImage: "pencil")
-                                }
-                                .tint(.orange)
+                            Button {
+                                selectedEvent = event
+                            } label: {
+                                Label("Modifier", systemImage: "pencil")
                             }
+                            .tint(.orange)
+                        }
                     }
                 } header: {
                     HStack(spacing: 8) {
@@ -148,18 +149,19 @@ struct EventsView: View {
             if !pastEvents.isEmpty {
                 Section {
                     ForEach(pastEvents) { event in
-                        MyEventRowView(event: event)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedEvent = event
+                        Button {
+                            selectedEvent = event
+                        } label: {
+                            MyEventRowView(event: event)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteEvent(event)
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deleteEvent(event)
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
-                            }
+                        }
                     }
                 } header: {
                     Text("Passés")

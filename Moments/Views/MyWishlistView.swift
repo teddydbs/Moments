@@ -7,12 +7,10 @@
 
 import SwiftUI
 import SwiftData
+import Supabase
 
 struct MyWishlistView: View {
     @Environment(\.modelContext) private var modelContext
-
-    // 🆕 WishlistManager pour la synchronisation Supabase
-    @StateObject private var wishlistManager: WishlistManager
 
     // Query tous mes événements
     @Query(sort: \MyEvent.date, order: .forward) private var allMyEvents: [MyEvent]
@@ -38,15 +36,10 @@ struct MyWishlistView: View {
     @State private var selectedEvent: MyEvent?
     @State private var showingAddWishlistItem = false
     @State private var itemToEdit: WishlistItem?
+    @State private var itemToView: WishlistItem?
     @State private var showingSyncError = false
-
-    // MARK: - Initialization
-
-    /// ✅ Initialiser le manager avec le modelContext
-    init() {
-        // ⚠️ On utilise un placeholder qui sera remplacé dans .onAppear
-        _wishlistManager = StateObject(wrappedValue: WishlistManager(modelContext: ModelContext(ModelContainer.preview)))
-    }
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -56,7 +49,7 @@ struct MyWishlistView: View {
                     .ignoresSafeArea()
                     .opacity(0.03)
 
-                if wishlistManager.isLoading {
+                if isLoading {
                     // 🔄 Indicateur de chargement
                     ProgressView("Synchronisation...")
                         .controlSize(.large)
@@ -87,9 +80,9 @@ struct MyWishlistView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.title3)
-                            .foregroundColor(wishlistManager.isLoading ? .gray : .blue)
+                            .foregroundColor(isLoading ? .gray : .blue)
                     }
-                    .disabled(wishlistManager.isLoading)
+                    .disabled(isLoading)
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -101,9 +94,12 @@ struct MyWishlistView: View {
             .sheet(item: $itemToEdit) { item in
                 AddEditWishlistItemView(myEvent: item.myEvent, contact: item.contact, wishlistItem: item)
             }
+            .sheet(item: $itemToView) { item in
+                WishlistItemDetailView(item: item)
+            }
             .alert("Erreur de synchronisation", isPresented: $showingSyncError) {
                 Button("OK", role: .cancel) {
-                    wishlistManager.errorMessage = nil
+                    errorMessage = nil
                 }
                 Button("Réessayer") {
                     Task {
@@ -111,13 +107,18 @@ struct MyWishlistView: View {
                     }
                 }
             } message: {
-                Text(wishlistManager.errorMessage ?? "Une erreur est survenue")
+                Text(errorMessage ?? "Une erreur est survenue")
             }
-            .task {
-                // 🔄 Synchronisation automatique au chargement de la vue
-                await syncWishlist()
+            .onAppear {
+                // ⚠️ Synchronisation UNIQUEMENT si la liste est vide
+                // (Évite de recharger après chaque suppression)
+                if allWishlistItems.isEmpty {
+                    Task {
+                        await syncWishlist()
+                    }
+                }
             }
-            .onChange(of: wishlistManager.errorMessage) { _, newValue in
+            .onChange(of: errorMessage) { _, newValue in
                 showingSyncError = newValue != nil
             }
         }
@@ -159,8 +160,7 @@ struct MyWishlistView: View {
                         WishlistItemRowView(item: item)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                // Navigation vers le détail
-                                // TODO: Implémenter navigation
+                                itemToView = item
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
@@ -246,11 +246,20 @@ struct MyWishlistView: View {
 
     /// Synchronise la wishlist avec Supabase
     private func syncWishlist() async {
+        isLoading = true
+        errorMessage = nil
+
         do {
-            try await wishlistManager.loadWishlist()
+            // Créer un WishlistManager temporaire avec le BON modelContext
+            let manager = WishlistManager(modelContext: modelContext)
+            try await manager.loadWishlist()
+
+            isLoading = false
+            print("✅ Wishlist synchronisée avec succès")
         } catch {
+            isLoading = false
+            errorMessage = error.localizedDescription
             print("❌ Erreur de synchronisation: \(error)")
-            // L'erreur sera affichée via l'alert
         }
     }
 
@@ -258,11 +267,37 @@ struct MyWishlistView: View {
     private func deleteWishlistItem(_ item: WishlistItem) {
         Task {
             do {
-                // ✅ Utiliser le manager pour supprimer (synchronise automatiquement)
-                try await wishlistManager.deleteItem(item)
+                print("🗑️ Suppression de l'item: \(item.title)")
+
+                let itemId = item.id.uuidString
+
+                // 1. Supprimer depuis Supabase D'ABORD
+                try await SupabaseManager.shared.client
+                    .from("wishlist_items")
+                    .delete()
+                    .eq("id", value: itemId)
+                    .execute()
+
+                print("✅ Item supprimé de Supabase")
+
+                // 2. Supprimer localement avec le BON modelContext
+                await MainActor.run {
+                    modelContext.delete(item)
+
+                    do {
+                        try modelContext.save()
+                        print("✅ Item supprimé de SwiftData - @Query va se rafraîchir automatiquement")
+                    } catch {
+                        print("❌ Erreur lors de la sauvegarde: \(error)")
+                        errorMessage = error.localizedDescription
+                    }
+                }
+
             } catch {
-                print("❌ Erreur lors de la suppression du cadeau: \(error)")
-                wishlistManager.errorMessage = error.localizedDescription
+                await MainActor.run {
+                    print("❌ Erreur lors de la suppression du cadeau: \(error)")
+                    errorMessage = error.localizedDescription
+                }
             }
         }
     }

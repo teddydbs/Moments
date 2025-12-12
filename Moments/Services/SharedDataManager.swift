@@ -27,6 +27,7 @@ class SharedDataManager {
 
     private enum Keys {
         static let pendingWishlistItems = "pendingWishlistItems"
+        static let availableEvents = "availableEvents"
     }
 
     // MARK: - Initialization
@@ -77,6 +78,38 @@ class SharedDataManager {
         items.removeAll { $0.id == id }
         savePendingWishlistItems(items)
         print("🗑️ Produit supprimé des pending items: \(id)")
+    }
+
+    // MARK: - Event Sync
+
+    /// Sauvegarde la liste des événements pour la Share Extension
+    /// - Parameter events: Liste d'événements simplifiés
+    func saveAvailableEvents(_ events: [SharedEvent]) {
+        do {
+            let data = try JSONEncoder().encode(events)
+            sharedDefaults?.set(data, forKey: Keys.availableEvents)
+            print("💾 \(events.count) événements sauvegardés pour Share Extension")
+        } catch {
+            print("❌ Erreur lors de la sauvegarde des événements: \(error)")
+        }
+    }
+
+    /// Récupère la liste des événements disponibles
+    /// - Returns: Liste des événements
+    func getAvailableEvents() -> [SharedEvent] {
+        guard let sharedDefaults = sharedDefaults,
+              let data = sharedDefaults.data(forKey: Keys.availableEvents) else {
+            return []
+        }
+
+        do {
+            let events = try JSONDecoder().decode([SharedEvent].self, from: data)
+            print("📦 \(events.count) événements récupérés")
+            return events
+        } catch {
+            print("❌ Erreur lors de la lecture des événements: \(error)")
+            return []
+        }
     }
 
     // MARK: - Private Methods
@@ -140,5 +173,29 @@ struct PendingWishlistItem: Codable, Identifiable {
         self.priority = priority
         self.eventId = eventId
         self.createdAt = createdAt
+    }
+}
+
+// MARK: - SharedEvent Model
+
+/// Représente un événement simplifié pour la Share Extension
+struct SharedEvent: Codable, Identifiable {
+    /// Identifiant unique
+    let id: UUID
+
+    /// Titre de l'événement
+    let title: String
+
+    /// Icône SF Symbol
+    let icon: String
+
+    /// Date de l'événement
+    let date: Date
+
+    init(id: UUID, title: String, icon: String, date: Date) {
+        self.id = id
+        self.title = title
+        self.icon = icon
+        self.date = date
     }
 }

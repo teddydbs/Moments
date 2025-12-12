@@ -40,6 +40,11 @@ struct AddEditMyEventView: View {
     @State private var selectedProfilePhoto: PhotosPickerItem?
     @State private var profilePhotoData: Data?
 
+    // Pour les participants
+    @State private var selectedContacts: [SelectedContact] = []
+    @State private var showContactPicker = false
+    @State private var showManualAdd = false
+
     private var isEditing: Bool {
         myEvent != nil
     }
@@ -227,6 +232,81 @@ struct AddEditMyEventView: View {
                         }
                     }
 
+                    // Section: Participants
+                    Section {
+                        // ✅ Bouton pour ajouter depuis les contacts
+                        Button {
+                            showContactPicker = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                    .foregroundColor(MomentsTheme.primaryPurple)
+                                Text("Inviter depuis les contacts")
+                                    .foregroundColor(.primary)
+                                Spacer()
+                            }
+                        }
+
+                        // ✅ Bouton pour ajouter manuellement
+                        Button {
+                            showManualAdd = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "person.badge.plus")
+                                    .foregroundColor(MomentsTheme.primaryPurple)
+                                Text("Ajouter manuellement")
+                                    .foregroundColor(.primary)
+                                Spacer()
+                            }
+                        }
+
+                        // ✅ Liste des participants sélectionnés
+                        if !selectedContacts.isEmpty {
+                            ForEach(selectedContacts) { contact in
+                                HStack {
+                                    // Icône de personne
+                                    ZStack {
+                                        Circle()
+                                            .fill(MomentsTheme.primaryPurple.opacity(0.1))
+                                            .frame(width: 40, height: 40)
+
+                                        Text(contact.name.prefix(1).uppercased())
+                                            .font(.headline)
+                                            .foregroundColor(MomentsTheme.primaryPurple)
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(contact.name)
+                                            .font(.body)
+
+                                        if let email = contact.email {
+                                            Text(email)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        } else if let phone = contact.phoneNumber {
+                                            Text(phone)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+
+                                    Spacer()
+                                }
+                            }
+                            .onDelete { indexSet in
+                                selectedContacts.remove(atOffsets: indexSet)
+                            }
+                        }
+                    } header: {
+                        Text("Participants (\(selectedContacts.count))")
+                    } footer: {
+                        if selectedContacts.isEmpty {
+                            Text("Invite tes amis en sélectionnant des contacts depuis ton téléphone")
+                        } else {
+                            Text("Glisse vers la gauche pour retirer un participant")
+                        }
+                    }
+
                     // Section: Invitations
                     Section("Gestion des invitations") {
                         HStack {
@@ -284,6 +364,12 @@ struct AddEditMyEventView: View {
                         profilePhotoData = data
                     }
                 }
+            }
+            .sheet(isPresented: $showContactPicker) {
+                CustomContactPickerView(selectedContacts: $selectedContacts)
+            }
+            .sheet(isPresented: $showManualAdd) {
+                AddManualContactView(selectedContacts: $selectedContacts)
             }
         }
     }
@@ -357,6 +443,18 @@ struct AddEditMyEventView: View {
         coverPhotoData = event.coverPhoto
         profilePhotoData = event.profilePhoto
 
+        // ✅ Charger les participants existants (invitations)
+        if let invitations = event.invitations {
+            selectedContacts = invitations.map { invitation in
+                SelectedContact(
+                    name: invitation.guestName,
+                    email: invitation.guestEmail,
+                    phoneNumber: invitation.guestPhoneNumber,
+                    contactIdentifier: invitation.id.uuidString // ⚠️ Utiliser l'ID de l'invitation comme identifier
+                )
+            }
+        }
+
         // ✅ Géocoder l'adresse si elle existe
         if !locationAddress.isEmpty {
             Task {
@@ -367,6 +465,8 @@ struct AddEditMyEventView: View {
 
     private func saveEvent() {
         let maxGuestsInt = Int(maxGuests)
+
+        let eventToSave: MyEvent
 
         if let existingEvent = myEvent {
             // Mise à jour de l'événement existant
@@ -382,6 +482,19 @@ struct AddEditMyEventView: View {
             existingEvent.maxGuests = maxGuestsInt
             existingEvent.rsvpDeadline = hasRSVPDeadline ? rsvpDeadline : nil
             existingEvent.updatedAt = Date()
+            eventToSave = existingEvent
+
+            // ✅ ÉTAPE 1: Supprimer les invitations existantes qui ne sont plus dans la sélection
+            if let existingInvitations = existingEvent.invitations {
+                let selectedIdentifiers = Set(selectedContacts.map { $0.contactIdentifier })
+
+                for invitation in existingInvitations {
+                    // Si l'invitation n'est plus dans les contacts sélectionnés, la supprimer
+                    if !selectedIdentifiers.contains(invitation.id.uuidString) {
+                        modelContext.delete(invitation)
+                    }
+                }
+            }
         } else {
             // Création d'un nouvel événement
             let newEvent = MyEvent(
@@ -398,15 +511,44 @@ struct AddEditMyEventView: View {
                 rsvpDeadline: hasRSVPDeadline ? rsvpDeadline : nil
             )
             modelContext.insert(newEvent)
+            eventToSave = newEvent
         }
+
+        // ✅ ÉTAPE 2: Créer les invitations pour les nouveaux participants
+        createInvitationsForParticipants(event: eventToSave)
 
         // Sauvegarder le contexte
         do {
             try modelContext.save()
-            print("✅ Événement sauvegardé avec succès")
+            print("✅ Événement sauvegardé avec succès avec \(selectedContacts.count) participant(s)")
             dismiss()
         } catch {
             print("❌ Erreur lors de la sauvegarde de l'événement: \(error)")
+        }
+    }
+
+    /// Crée des invitations pour tous les participants sélectionnés
+    /// - Parameter event: L'événement auquel ajouter les invitations
+    private func createInvitationsForParticipants(event: MyEvent) {
+        // ❓ POURQUOI vérifier les invitations existantes ?
+        // Pour éviter de créer des doublons si on édite un événement
+        let existingInvitations = event.invitations ?? []
+        let existingIdentifiers = Set(existingInvitations.map { $0.id.uuidString })
+
+        for contact in selectedContacts {
+            // ✅ VÉRIFICATION: Ne créer l'invitation que si elle n'existe pas déjà
+            if !existingIdentifiers.contains(contact.contactIdentifier) {
+                let invitation = Invitation(
+                    guestName: contact.name,
+                    guestEmail: contact.email,
+                    guestPhoneNumber: contact.phoneNumber,
+                    status: .pending,
+                    sentAt: Date(),
+                    myEvent: event
+                )
+                modelContext.insert(invitation)
+                print("✅ Invitation créée pour \(contact.name)")
+            }
         }
     }
 }

@@ -94,6 +94,10 @@ class MyEvent {
     @Relationship(deleteRule: .cascade, inverse: \WishlistItem.myEvent)
     var wishlistItems: [WishlistItem]?
 
+    /// ✅ RELATION: Photos de l'événement (album partagé)
+    @Relationship(deleteRule: .cascade)
+    var eventPhotos: [EventPhoto]?
+
     // MARK: - Computed Properties
 
     /// Nombre total d'invités
@@ -141,6 +145,11 @@ class MyEvent {
     /// Nombre de cadeaux dans la wishlist
     var wishlistCount: Int {
         wishlistItems?.count ?? 0
+    }
+
+    /// Nombre de photos dans l'album
+    var photosCount: Int {
+        eventPhotos?.count ?? 0
     }
 
     // MARK: - Initialization

@@ -36,7 +36,20 @@ struct HomeView: View {
     }
 
     private var userName: String {
-        authManager.currentUser?.name.components(separatedBy: " ").first ?? "Utilisateur"
+        // ✅ Utiliser le profil complet en priorité, sinon les infos OAuth
+        if let profile = authManager.userProfile {
+            return profile.firstName.isEmpty ? "Utilisateur" : profile.firstName
+        }
+        return authManager.currentUser?.displayName.components(separatedBy: " ").first ?? "Utilisateur"
+    }
+
+    /// Salutation qui change en fonction de l'heure
+    /// - Returns: "Bonjour" (5h-17h59) ou "Bonsoir" (18h-4h59)
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        // 🌅 Bonjour : 5h00 à 17h59
+        // 🌙 Bonsoir : 18h00 à 4h59
+        return (hour >= 5 && hour < 18) ? "Bonjour" : "Bonsoir"
     }
 
     // MARK: - Body
@@ -100,7 +113,7 @@ struct HomeView: View {
             }
 
             // Greeting
-            Text("Bonjour, \(userName)")
+            Text("\(greeting), \(userName)")
                 .font(.system(size: 28, weight: .bold))
                 .foregroundColor(.primary)
         }

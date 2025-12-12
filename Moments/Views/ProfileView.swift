@@ -4,18 +4,25 @@
 //
 //  Vue pour créer/éditer le profil utilisateur
 //  Permet de renseigner nom, prénom, date de naissance, photo
+//  Synchronise avec Supabase via ProfileManager
 //
 
 import SwiftUI
 import SwiftData
 import PhotosUI
+import Supabase
+import Auth
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authManager: AuthManager
 
-    @Query private var users: [AppUser]
+    // ✅ Utiliser UserProfile au lieu de AppUser
+    @Query private var profiles: [UserProfile]
+
+    // ProfileManager pour la synchronisation Supabase (initialisé dans onAppear)
+    @State private var profileManager: ProfileManager?
 
     @State private var firstName: String = ""
     @State private var lastName: String = ""
@@ -23,15 +30,16 @@ struct ProfileView: View {
     @State private var phoneNumber: String = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var profilePhoto: Data?
-    @State private var showingImagePicker = false
+    @State private var isLoading: Bool = false
+    @State private var errorMessage: String?
 
     // Computed property pour savoir si on crée ou édite
-    private var existingUser: AppUser? {
-        users.first
+    private var existingProfile: UserProfile? {
+        profiles.first
     }
 
     private var isEditing: Bool {
-        existingUser != nil
+        existingProfile != nil
     }
 
     var body: some View {
@@ -193,17 +201,30 @@ struct ProfileView: View {
                         }
                         .padding(.horizontal, 24)
 
+                        // Message d'erreur
+                        if let errorMessage = errorMessage {
+                            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding(.horizontal, 24)
+                        }
+
                         // Bouton sauvegarder
                         Button {
                             saveProfile()
                         } label: {
-                            Text(isEditing ? "Mettre à jour" : "Créer mon profil")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
+                            if isLoading {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Text(isEditing ? "Mettre à jour" : "Créer mon profil")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
                         .buttonStyle(MomentsTheme.PrimaryButtonStyle())
-                        .disabled(firstName.isEmpty || lastName.isEmpty)
-                        .opacity((firstName.isEmpty || lastName.isEmpty) ? 0.6 : 1.0)
+                        .disabled(firstName.isEmpty || lastName.isEmpty || isLoading)
+                        .opacity((firstName.isEmpty || lastName.isEmpty || isLoading) ? 0.6 : 1.0)
                         .padding(.horizontal, 24)
 
                         Spacer()
@@ -218,10 +239,15 @@ struct ProfileView: View {
                         Button("Annuler") {
                             dismiss()
                         }
+                        .disabled(isLoading)
                     }
                 }
             }
             .onAppear {
+                // ✅ Initialiser le ProfileManager avec le modelContext
+                if profileManager == nil {
+                    profileManager = ProfileManager(modelContext: modelContext)
+                }
                 loadExistingProfile()
             }
             .onChange(of: selectedPhoto) { _, newValue in
@@ -236,47 +262,131 @@ struct ProfileView: View {
 
     // MARK: - Methods
 
+    /// Charge le profil existant depuis SwiftData
     private func loadExistingProfile() {
-        guard let user = existingUser else { return }
-
-        firstName = user.firstName
-        lastName = user.lastName
-        birthDate = user.birthDate ?? Date()
-        phoneNumber = user.phoneNumber ?? ""
-        profilePhoto = user.profilePhoto
-    }
-
-    private func saveProfile() {
-        let email = authManager.currentUser?.email ?? ""
-
-        if let user = existingUser {
-            // Mise à jour du profil existant
-            user.firstName = firstName
-            user.lastName = lastName
-            user.birthDate = birthDate
-            user.phoneNumber = phoneNumber.isEmpty ? nil : phoneNumber
-            user.profilePhoto = profilePhoto
-            user.updatedAt = Date()
-        } else {
-            // Création d'un nouveau profil
-            let newUser = AppUser(
-                firstName: firstName,
-                lastName: lastName,
-                email: email,
-                birthDate: birthDate,
-                profilePhoto: profilePhoto,
-                phoneNumber: phoneNumber.isEmpty ? nil : phoneNumber
-            )
-            modelContext.insert(newUser)
+        guard let profile = existingProfile else {
+            // Pas de profil local, essayer de charger depuis Supabase
+            Task {
+                await loadProfileFromSupabase()
+            }
+            return
         }
 
-        // Sauvegarder le contexte
+        // Charger les données du profil local
+        firstName = profile.firstName
+        lastName = profile.lastName
+        birthDate = profile.birthDate ?? Date()
+        phoneNumber = profile.phoneNumber ?? ""
+        profilePhoto = profile.profilePhotoData
+    }
+
+    /// Charge le profil depuis Supabase
+    private func loadProfileFromSupabase() async {
+        guard let manager = profileManager else { return }
+        isLoading = true
+
         do {
-            try modelContext.save()
-            print("✅ Profil sauvegardé avec succès")
-            dismiss()
+            try await manager.loadUserProfile()
+
+            if let profile = manager.currentProfile {
+                await MainActor.run {
+                    firstName = profile.firstName
+                    lastName = profile.lastName
+                    birthDate = profile.birthDate ?? Date()
+                    phoneNumber = profile.phoneNumber ?? ""
+                    profilePhoto = profile.profilePhotoData
+                }
+            }
+
+            isLoading = false
         } catch {
-            print("❌ Erreur lors de la sauvegarde du profil: \(error)")
+            await MainActor.run {
+                isLoading = false
+                errorMessage = "Erreur de chargement du profil"
+                print("❌ Erreur loadProfileFromSupabase: \(error)")
+            }
+        }
+    }
+
+    /// Sauvegarde le profil (local et distant)
+    private func saveProfile() {
+        guard let manager = profileManager else {
+            errorMessage = "ProfileManager non initialisé"
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+
+        Task {
+            do {
+                // ✅ Récupérer l'ID utilisateur depuis la session Supabase
+                guard let userId = try? await SupabaseManager.shared.client.auth.session.user.id else {
+                    throw ProfileError.notAuthenticated
+                }
+
+                if let existingProfile = existingProfile {
+                    // ⚙️ MISE À JOUR du profil existant
+                    print("🔄 Mise à jour du profil existant...")
+
+                    // Mettre à jour les données locales
+                    existingProfile.firstName = firstName
+                    existingProfile.lastName = lastName
+                    existingProfile.birthDate = birthDate
+                    existingProfile.phoneNumber = phoneNumber.isEmpty ? nil : phoneNumber
+                    existingProfile.profilePhotoData = profilePhoto
+
+                    // Synchroniser avec Supabase
+                    try await manager.updateProfile(existingProfile)
+
+                    // Upload photo si modifiée
+                    if let photoData = profilePhoto,
+                       photoData != existingProfile.profilePhotoData {
+                        try await manager.uploadProfilePhoto(photoData, for: existingProfile)
+                    }
+
+                    await MainActor.run {
+                        isLoading = false
+                        print("✅ Profil mis à jour avec succès")
+                        dismiss()
+                    }
+
+                } else {
+                    // ➕ CRÉATION d'un nouveau profil
+                    print("➕ Création d'un nouveau profil...")
+
+                    let newProfile = UserProfile(
+                        id: userId,
+                        firstName: firstName,
+                        lastName: lastName,
+                        birthDate: birthDate,
+                        phoneNumber: phoneNumber.isEmpty ? nil : phoneNumber,
+                        profilePhotoData: profilePhoto,
+                        onboardingCompleted: true
+                    )
+
+                    // Créer dans Supabase ET localement
+                    try await manager.createProfile(newProfile)
+
+                    // Upload photo si présente
+                    if let photoData = profilePhoto {
+                        try await manager.uploadProfilePhoto(photoData, for: newProfile)
+                    }
+
+                    await MainActor.run {
+                        isLoading = false
+                        print("✅ Profil créé avec succès")
+                        dismiss()
+                    }
+                }
+
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Erreur de sauvegarde: \(error.localizedDescription)"
+                    print("❌ Erreur saveProfile: \(error)")
+                }
+            }
         }
     }
 }
@@ -284,5 +394,5 @@ struct ProfileView: View {
 #Preview {
     ProfileView()
         .environmentObject(AuthManager.shared)
-        .modelContainer(for: [AppUser.self], inMemory: true)
+        .modelContainer(for: [UserProfile.self], inMemory: true)
 }

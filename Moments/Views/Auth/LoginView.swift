@@ -161,6 +161,59 @@ struct LoginView: View {
                             }
                             .padding(.horizontal, 24)
 
+                            // OAuth buttons
+                            VStack(spacing: 12) {
+                                // Google Sign In
+                                Button {
+                                    loginWithGoogle()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "globe")
+                                            .font(.title3)
+                                        Text("Continuer avec Google")
+                                            .font(.headline)
+                                    }
+                                    .foregroundColor(.primary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color(.systemBackground))
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                    )
+                                }
+                                .disabled(isLoading)
+
+                                // Apple Sign In
+                                Button {
+                                    loginWithApple()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "apple.logo")
+                                            .font(.title3)
+                                        Text("Continuer avec Apple")
+                                            .font(.headline)
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.black)
+                                    .cornerRadius(12)
+                                }
+                                .disabled(isLoading)
+                            }
+                            .padding(.horizontal, 24)
+
+                            // Divider
+                            HStack {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.3))
+                                    .frame(height: 1)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 8)
+
                             // Sign up button
                             Button {
                                 showingSignUp = true
@@ -198,23 +251,76 @@ struct LoginView: View {
         isLoading = true
         errorMessage = nil
 
-        // Simulation d'un délai réseau
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isLoading = false
+        Task {
+            do {
+                // Connexion avec Supabase
+                try await SupabaseManager.shared.signIn(email: email, password: password)
 
-            // Utiliser AuthManager pour la connexion
-            let success = authManager.login(email: email, password: password)
+                // Charger les informations utilisateur
+                await authManager.loadUserFromSupabase()
 
-            if success {
-                print("✅ Login simulé avec succès: \(email)")
-                // L'authentification réussie déclenche automatiquement la navigation vers MainTabView
-            } else {
-                if !email.contains("@") {
-                    errorMessage = "Email invalide"
-                } else if password.count < 6 {
-                    errorMessage = "Le mot de passe doit contenir au moins 6 caractères"
-                } else {
-                    errorMessage = "Erreur de connexion"
+                await MainActor.run {
+                    isLoading = false
+                    print("✅ Connexion réussie avec Supabase: \(email)")
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Erreur de connexion: \(error.localizedDescription)"
+                    print("❌ Erreur de connexion: \(error)")
+                }
+            }
+        }
+    }
+
+    private func loginWithGoogle() {
+        print("🔵 BOUTON GOOGLE CLIQUÉ !")
+        isLoading = true
+        errorMessage = nil
+
+        Task {
+            print("🔵 Task lancée pour OAuth Google")
+            do {
+                print("🔵 Appel de signInWithGoogle()...")
+                try await SupabaseManager.shared.signInWithGoogle()
+
+                // ✅ Charger les informations utilisateur depuis Supabase
+                await authManager.loadUserFromSupabase()
+
+                await MainActor.run {
+                    isLoading = false
+                    print("✅ Connexion Google réussie")
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Erreur OAuth: \(error.localizedDescription)"
+                    print("❌ Erreur Google OAuth: \(error)")
+                }
+            }
+        }
+    }
+
+    private func loginWithApple() {
+        isLoading = true
+        errorMessage = nil
+
+        Task {
+            do {
+                try await SupabaseManager.shared.signInWithApple()
+
+                // ✅ Charger les informations utilisateur depuis Supabase
+                await authManager.loadUserFromSupabase()
+
+                await MainActor.run {
+                    isLoading = false
+                    print("✅ Connexion Apple réussie")
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "OAuth Apple n'est pas encore configuré"
+                    print("❌ Erreur Apple OAuth: \(error)")
                 }
             }
         }

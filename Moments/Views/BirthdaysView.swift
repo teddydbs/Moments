@@ -123,25 +123,26 @@ struct BirthdaysView: View {
             if !birthdaysToday.isEmpty {
                 Section {
                     ForEach(birthdaysToday) { contact in
-                        ContactRowView(contact: contact)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedContact = contact
+                        Button {
+                            selectedContact = contact
+                        } label: {
+                            ContactRowView(contact: contact)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteContact(contact)
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deleteContact(contact)
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
 
-                                Button {
-                                    selectedContact = contact
-                                } label: {
-                                    Label("Modifier", systemImage: "pencil")
-                                }
-                                .tint(.orange)
+                            Button {
+                                selectedContact = contact
+                            } label: {
+                                Label("Modifier", systemImage: "pencil")
                             }
+                            .tint(.orange)
+                        }
                     }
                 } header: {
                     HStack(spacing: 8) {
@@ -158,25 +159,26 @@ struct BirthdaysView: View {
             if !birthdaysThisWeek.isEmpty {
                 Section {
                     ForEach(birthdaysThisWeek) { contact in
-                        ContactRowView(contact: contact)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedContact = contact
+                        Button {
+                            selectedContact = contact
+                        } label: {
+                            ContactRowView(contact: contact)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteContact(contact)
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deleteContact(contact)
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
 
-                                Button {
-                                    selectedContact = contact
-                                } label: {
-                                    Label("Modifier", systemImage: "pencil")
-                                }
-                                .tint(.orange)
+                            Button {
+                                selectedContact = contact
+                            } label: {
+                                Label("Modifier", systemImage: "pencil")
                             }
+                            .tint(.orange)
+                        }
                     }
                 } header: {
                     HStack(spacing: 8) {
@@ -193,25 +195,26 @@ struct BirthdaysView: View {
             if !upcomingBirthdays.isEmpty {
                 Section {
                     ForEach(upcomingBirthdays) { contact in
-                        ContactRowView(contact: contact)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedContact = contact
+                        Button {
+                            selectedContact = contact
+                        } label: {
+                            ContactRowView(contact: contact)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteContact(contact)
+                            } label: {
+                                Label("Supprimer", systemImage: "trash")
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deleteContact(contact)
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
 
-                                Button {
-                                    selectedContact = contact
-                                } label: {
-                                    Label("Modifier", systemImage: "pencil")
-                                }
-                                .tint(.orange)
+                            Button {
+                                selectedContact = contact
+                            } label: {
+                                Label("Modifier", systemImage: "pencil")
                             }
+                            .tint(.orange)
+                        }
                     }
                 } header: {
                     Text("À venir")

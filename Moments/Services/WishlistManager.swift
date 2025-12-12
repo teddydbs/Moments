@@ -231,21 +231,30 @@ class WishlistManager: ObservableObject {
         do {
             print("🗑️ Suppression de l'item: \(item.title)")
 
-            // 1. Supprimer localement
-            modelContext.delete(item)
-            try modelContext.save()
+            let itemId = item.id.uuidString
 
-            // 2. Supprimer depuis Supabase
+            // 1. Supprimer depuis Supabase AVANT de supprimer localement
+            // (Si Supabase échoue, on annule la suppression locale)
             try await supabase.client
                 .from("wishlist_items")
                 .delete()
-                .eq("id", value: item.id.uuidString)
+                .eq("id", value: itemId)
                 .execute()
 
-            // 3. Recharger la liste
-            try await refreshLocalWishlist()
+            print("✅ Item supprimé de Supabase")
 
-            print("✅ Item supprimé avec succès")
+            // 2. Supprimer localement
+            modelContext.delete(item)
+            try modelContext.save()
+
+            print("✅ Item supprimé de SwiftData")
+
+            // 3. Mettre à jour la liste publishée (sans recharger depuis SwiftData)
+            await MainActor.run {
+                wishlistItems.removeAll { $0.id.uuidString == itemId }
+            }
+
+            print("✅ Item supprimé avec succès de la liste")
 
         } catch {
             print("❌ Erreur deleteItem: \(error)")
@@ -293,39 +302,38 @@ class WishlistManager: ObservableObject {
     ///   - urlString: L'URL du produit
     ///
     /// ✅ Cette méthode s'exécute en arrière-plan et ne bloque pas l'utilisateur
-    /// ⚠️ Si l'extraction échoue, l'item garde son titre placeholder "Chargement..."
+    /// ⚠️ Si l'extraction échoue, l'item utilise un titre intelligent extrait de l'URL
     func fetchAndUpdateMetadata(for item: WishlistItem, from urlString: String) async {
         print("🔄 Extraction des métadonnées en arrière-plan pour: \(urlString)")
 
         // Extraire les métadonnées
         let fetcher = ProductMetadataFetcher()
-        guard let metadata = await fetcher.fetchMetadata(from: urlString) else {
-            print("⚠️ Impossible d'extraire les métadonnées, l'item garde son titre placeholder")
-            // Ne pas mettre à jour l'item si l'extraction échoue
-            return
-        }
+        let metadata = await fetcher.fetchMetadata(from: urlString)
 
         // Mettre à jour l'item avec les métadonnées extraites
         await MainActor.run {
-            // ✅ Mettre à jour le titre si on en a un
-            if let title = metadata.title, !title.isEmpty {
+            // ✅ Mettre à jour le titre
+            if let title = metadata?.title, !title.isEmpty {
+                // Cas 1 : On a réussi à extraire un titre depuis les métadonnées
                 item.title = title
+                print("✅ Titre extrait depuis les métadonnées: \(title)")
             } else {
-                // Fallback : extraire le nom de domaine de l'URL
-                if let url = URL(string: urlString), let host = url.host {
-                    item.title = "Produit sur \(host)"
-                } else {
-                    item.title = "Produit sans nom"
-                }
+                // Cas 2 : Fallback intelligent - extraire le titre depuis l'URL
+                item.title = extractTitleFromURL(urlString)
+                print("⚠️ Fallback: titre extrait depuis l'URL: \(item.title)")
             }
 
-            // ✅ Mettre à jour le prix
-            item.price = metadata.price
+            // ✅ Mettre à jour le prix (si disponible)
+            if let price = metadata?.price {
+                item.price = price
+            }
 
-            // ✅ Mettre à jour l'image
-            item.image = metadata.imageData
+            // ✅ Mettre à jour l'image (si disponible)
+            if let imageData = metadata?.imageData {
+                item.image = imageData
+            }
 
-            print("✅ Métadonnées extraites: \(item.title), prix: \(item.price ?? 0)€")
+            print("✅ Métadonnées finales: \(item.title), prix: \(item.price ?? 0)€")
         }
 
         // ✅ Synchroniser avec Supabase
@@ -336,5 +344,67 @@ class WishlistManager: ObservableObject {
             print("❌ Erreur lors de la mise à jour: \(error)")
             // Ne pas bloquer si la sync échoue, l'item est au moins mis à jour localement
         }
+    }
+
+    // MARK: - URL Title Extraction
+
+    /// Extrait un titre intelligent depuis une URL produit
+    /// - Parameter urlString: L'URL du produit
+    /// - Returns: Titre formaté extrait de l'URL
+    ///
+    /// Exemples :
+    /// - `https://www.fnac.com/a21720092/Fabien-Olicard-Les-entrailles-du-temps`
+    ///   → "Fabien Olicard Les Entrailles Du Temps"
+    /// - `https://www.amazon.fr/dp/B08X6F1234`
+    ///   → "Produit Amazon"
+    /// - `https://www.exemple.com/produit-super-cool-2024`
+    ///   → "Produit Super Cool 2024"
+    private func extractTitleFromURL(_ urlString: String) -> String {
+        guard let url = URL(string: urlString) else {
+            return "Produit sans nom"
+        }
+
+        let host = url.host ?? "site inconnu"
+        let path = url.path
+
+        // Cas 1: Amazon avec code ASIN (ex: /dp/B08X6F1234)
+        if host.contains("amazon") {
+            return "Produit Amazon"
+        }
+
+        // Cas 2: URL avec slug produit (ex: /a21720092/Fabien-Olicard-Les-entrailles-du-temps)
+        // Extraire le slug après le dernier "/"
+        let pathComponents = path.split(separator: "/")
+
+        // Chercher le composant le plus long (généralement le slug du produit)
+        let productSlug = pathComponents
+            .filter { $0.count > 3 } // Ignorer les segments très courts (ex: "a21720092")
+            .max(by: { $0.count < $1.count })
+
+        if let slug = productSlug {
+            // Convertir le slug en titre lisible
+            // Ex: "Fabien-Olicard-Les-entrailles-du-temps" → "Fabien Olicard Les Entrailles Du Temps"
+            let title = String(slug)
+                .replacingOccurrences(of: "-", with: " ") // Remplacer les tirets par des espaces
+                .replacingOccurrences(of: "_", with: " ") // Remplacer les underscores par des espaces
+                .split(separator: " ") // Découper en mots
+                .map { word in
+                    // Capitaliser chaque mot
+                    word.prefix(1).uppercased() + word.dropFirst().lowercased()
+                }
+                .joined(separator: " ")
+
+            // Limiter à 60 caractères max pour éviter les titres trop longs
+            if title.count > 60 {
+                let truncated = title.prefix(60)
+                return String(truncated) + "..."
+            }
+
+            return title
+        }
+
+        // Cas 3: Fallback - utiliser le nom de domaine
+        let domain = host.replacingOccurrences(of: "www.", with: "")
+        return "Produit sur \(domain)"
     }
 }

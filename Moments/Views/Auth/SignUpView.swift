@@ -235,6 +235,73 @@ struct SignUpView: View {
                             .opacity(isFormValid ? 1.0 : 0.6)
                             .padding(.horizontal, 24)
 
+                            // Divider
+                            HStack {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.3))
+                                    .frame(height: 1)
+                                Text("ou")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.3))
+                                    .frame(height: 1)
+                            }
+                            .padding(.horizontal, 24)
+
+                            // OAuth buttons
+                            VStack(spacing: 12) {
+                                // Google Sign Up
+                                Button {
+                                    signUpWithGoogle()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "globe")
+                                            .font(.title3)
+                                        Text("S'inscrire avec Google")
+                                            .font(.headline)
+                                    }
+                                    .foregroundColor(.primary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color(.systemBackground))
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                    )
+                                }
+                                .disabled(isLoading)
+
+                                // Apple Sign Up
+                                Button {
+                                    signUpWithApple()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "apple.logo")
+                                            .font(.title3)
+                                        Text("S'inscrire avec Apple")
+                                            .font(.headline)
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.black)
+                                    .cornerRadius(12)
+                                }
+                                .disabled(isLoading)
+                            }
+                            .padding(.horizontal, 24)
+
+                            // Divider
+                            HStack {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.3))
+                                    .frame(height: 1)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 8)
+
                             // Already have account
                             Button {
                                 dismiss()
@@ -314,27 +381,81 @@ struct SignUpView: View {
         isLoading = true
         errorMessage = nil
 
-        // Simulation d'un délai réseau
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            isLoading = false
+        Task {
+            do {
+                // Inscription avec Supabase
+                try await SupabaseManager.shared.signUp(
+                    email: email,
+                    password: password,
+                    fullName: name
+                )
 
-            // Validation
-            guard isFormValid else {
-                errorMessage = "Veuillez remplir tous les champs correctement"
-                return
+                // Charger les informations utilisateur
+                await authManager.loadUserFromSupabase()
+
+                await MainActor.run {
+                    isLoading = false
+                    print("✅ Inscription réussie avec Supabase: \(email)")
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "Erreur d'inscription: \(error.localizedDescription)"
+                    print("❌ Erreur d'inscription: \(error)")
+                }
             }
+        }
+    }
 
-            // Utiliser AuthManager pour l'inscription
-            let success = authManager.signUp(name: name, email: email, password: password)
+    private func signUpWithGoogle() {
+        isLoading = true
+        errorMessage = nil
 
-            if success {
-                print("✅ Inscription simulée avec succès:")
-                print("   Nom: \(name)")
-                print("   Email: \(email)")
-                // L'authentification réussie déclenche automatiquement la navigation vers MainTabView
-                dismiss()
-            } else {
-                errorMessage = "Erreur lors de l'inscription"
+        Task {
+            do {
+                try await SupabaseManager.shared.signInWithGoogle()
+
+                // ✅ Charger les informations utilisateur depuis Supabase
+                await authManager.loadUserFromSupabase()
+
+                await MainActor.run {
+                    isLoading = false
+                    print("✅ Inscription Google réussie")
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "OAuth Google n'est pas encore configuré"
+                    print("❌ Erreur Google OAuth: \(error)")
+                }
+            }
+        }
+    }
+
+    private func signUpWithApple() {
+        isLoading = true
+        errorMessage = nil
+
+        Task {
+            do {
+                try await SupabaseManager.shared.signInWithApple()
+
+                // ✅ Charger les informations utilisateur depuis Supabase
+                await authManager.loadUserFromSupabase()
+
+                await MainActor.run {
+                    isLoading = false
+                    print("✅ Inscription Apple réussie")
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = "OAuth Apple n'est pas encore configuré"
+                    print("❌ Erreur Apple OAuth: \(error)")
+                }
             }
         }
     }
