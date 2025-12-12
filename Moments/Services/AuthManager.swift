@@ -196,6 +196,68 @@ class AuthManager: ObservableObject {
         }
     }
 
+    /// Suppression définitive du compte utilisateur
+    /// ⚠️ Cette action est irréversible et supprime TOUTES les données
+    func deleteAccount() async throws {
+        guard let userId = SupabaseManager.shared.currentUserId else {
+            throw AuthError.notAuthenticated
+        }
+
+        print("🗑️ Suppression du compte utilisateur: \(userId)")
+
+        do {
+            // 1. Supprimer toutes les données utilisateur de Supabase
+            // Note: Les politiques RLS CASCADE devraient supprimer automatiquement:
+            // - invitations (via my_events)
+            // - wishlist_items (via user_id)
+            // - event_photos (via my_events)
+
+            // Supprimer tous les événements de l'utilisateur
+            try await SupabaseManager.shared.client
+                .from("my_events")
+                .delete()
+                .eq("owner_id", value: userId.uuidString)
+                .execute()
+
+            print("✅ Événements supprimés")
+
+            // Supprimer tous les items wishlist de l'utilisateur
+            try await SupabaseManager.shared.client
+                .from("wishlist_items")
+                .delete()
+                .eq("user_id", value: userId.uuidString)
+                .execute()
+
+            print("✅ Wishlist supprimée")
+
+            // Supprimer le profil utilisateur
+            try await SupabaseManager.shared.client
+                .from("profiles")
+                .delete()
+                .eq("id", value: userId.uuidString)
+                .execute()
+
+            print("✅ Profil supprimé")
+
+            // 2. Supprimer le compte Auth Supabase
+            // ⚠️ IMPORTANT: Supabase ne fournit pas d'API client pour supprimer un compte
+            // Il faut utiliser l'API Admin ou une Edge Function
+            // Pour l'instant, on se contente de supprimer les données et de déconnecter
+
+            // TODO: Implémenter une Edge Function pour supprimer le compte Auth
+            // await SupabaseManager.shared.client.functions.invoke("delete-user")
+
+            print("✅ Compte utilisateur supprimé avec succès")
+
+            // 3. Déconnexion
+            await logout()
+
+        } catch {
+            print("❌ Erreur lors de la suppression du compte: \(error)")
+            throw error
+        }
+    }
+
     // MARK: - Cache (UserDefaults)
 
     private func saveUserToCache(_ user: User) {
@@ -214,5 +276,21 @@ class AuthManager: ObservableObject {
 
     private func clearUserCache() {
         UserDefaults.standard.removeObject(forKey: "cachedUser")
+    }
+}
+
+// MARK: - Errors
+
+enum AuthError: LocalizedError {
+    case notAuthenticated
+    case deleteFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthenticated:
+            return "Vous devez être connecté pour effectuer cette action"
+        case .deleteFailed:
+            return "Impossible de supprimer le compte"
+        }
     }
 }

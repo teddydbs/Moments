@@ -14,6 +14,28 @@ struct SettingsView: View {
 
     @State private var showingLogoutAlert = false
     @State private var showingProfile = false
+    @State private var showingDeleteAccountAlert = false
+    @State private var showingDeleteConfirmation = false
+    @State private var deleteConfirmationText = ""
+
+    // MARK: - Delete Account
+
+    /// Supprime définitivement le compte utilisateur et toutes ses données
+    private func deleteAccount() async {
+        do {
+            // 1. Supprimer toutes les données Supabase
+            try await authManager.deleteAccount()
+
+            // 2. Déconnexion automatique
+            await authManager.logout()
+
+            // 3. Fermer les paramètres
+            dismiss()
+        } catch {
+            print("❌ Erreur lors de la suppression du compte: \(error)")
+            // TODO: Afficher une alert d'erreur à l'utilisateur
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -100,7 +122,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section {
+                Section("Aide et support") {
                     Link(destination: URL(string: "https://github.com")!) {
                         HStack {
                             Image(systemName: "info.circle")
@@ -111,7 +133,27 @@ struct SettingsView: View {
                     }
                 }
 
-                Section {
+                Section("Informations légales") {
+                    Link(destination: URL(string: "https://raw.githubusercontent.com/YOUR_USERNAME/Moments/main/docs/privacy-policy.md")!) {
+                        HStack {
+                            Image(systemName: "hand.raised.fill")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            Text("Politique de confidentialité")
+                        }
+                    }
+
+                    Link(destination: URL(string: "https://raw.githubusercontent.com/YOUR_USERNAME/Moments/main/docs/terms-of-service.md")!) {
+                        HStack {
+                            Image(systemName: "doc.text.fill")
+                                .foregroundColor(.blue)
+                                .frame(width: 30)
+                            Text("Conditions d'utilisation")
+                        }
+                    }
+                }
+
+                Section("Zone de danger") {
                     Button(role: .destructive) {
                         showingLogoutAlert = true
                     } label: {
@@ -121,6 +163,19 @@ struct SettingsView: View {
                             Text("Se déconnecter")
                         }
                     }
+
+                    Button(role: .destructive) {
+                        showingDeleteAccountAlert = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash.fill")
+                                .frame(width: 30)
+                            Text("Supprimer mon compte")
+                        }
+                    }
+                } footer: {
+                    Text("La suppression de votre compte est définitive et irréversible. Toutes vos données seront supprimées sous 30 jours.")
+                        .font(.caption)
                 }
             }
             .navigationTitle("Paramètres")
@@ -142,6 +197,30 @@ struct SettingsView: View {
                 }
             } message: {
                 Text("Êtes-vous sûr de vouloir vous déconnecter ?")
+            }
+            .alert("Supprimer mon compte", isPresented: $showingDeleteAccountAlert) {
+                Button("Annuler", role: .cancel) { }
+                Button("Continuer", role: .destructive) {
+                    showingDeleteConfirmation = true
+                }
+            } message: {
+                Text("⚠️ Cette action est irréversible.\n\nToutes vos données seront définitivement supprimées :\n• Événements et invitations\n• Listes de cadeaux\n• Photos et fichiers\n• Profil utilisateur\n\nVoulez-vous vraiment supprimer votre compte ?")
+            }
+            .alert("Confirmation finale", isPresented: $showingDeleteConfirmation) {
+                TextField("Tapez SUPPRIMER", text: $deleteConfirmationText)
+                Button("Annuler", role: .cancel) {
+                    deleteConfirmationText = ""
+                }
+                Button("Supprimer définitivement", role: .destructive) {
+                    if deleteConfirmationText == "SUPPRIMER" {
+                        Task {
+                            await deleteAccount()
+                        }
+                    }
+                    deleteConfirmationText = ""
+                }
+            } message: {
+                Text("Pour confirmer la suppression, tapez SUPPRIMER en majuscules.")
             }
             .sheet(isPresented: $showingProfile) {
                 ProfileView()
