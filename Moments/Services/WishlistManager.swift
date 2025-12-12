@@ -284,4 +284,57 @@ class WishlistManager: ObservableObject {
         item.status = .received
         try await updateItem(item)
     }
+
+    // MARK: - Background Metadata Fetching
+
+    /// Récupère les métadonnées d'un produit et met à jour l'item en arrière-plan
+    /// - Parameters:
+    ///   - item: L'item à mettre à jour
+    ///   - urlString: L'URL du produit
+    ///
+    /// ✅ Cette méthode s'exécute en arrière-plan et ne bloque pas l'utilisateur
+    /// ⚠️ Si l'extraction échoue, l'item garde son titre placeholder "Chargement..."
+    func fetchAndUpdateMetadata(for item: WishlistItem, from urlString: String) async {
+        print("🔄 Extraction des métadonnées en arrière-plan pour: \(urlString)")
+
+        // Extraire les métadonnées
+        let fetcher = ProductMetadataFetcher()
+        guard let metadata = await fetcher.fetchMetadata(from: urlString) else {
+            print("⚠️ Impossible d'extraire les métadonnées, l'item garde son titre placeholder")
+            // Ne pas mettre à jour l'item si l'extraction échoue
+            return
+        }
+
+        // Mettre à jour l'item avec les métadonnées extraites
+        await MainActor.run {
+            // ✅ Mettre à jour le titre si on en a un
+            if let title = metadata.title, !title.isEmpty {
+                item.title = title
+            } else {
+                // Fallback : extraire le nom de domaine de l'URL
+                if let url = URL(string: urlString), let host = url.host {
+                    item.title = "Produit sur \(host)"
+                } else {
+                    item.title = "Produit sans nom"
+                }
+            }
+
+            // ✅ Mettre à jour le prix
+            item.price = metadata.price
+
+            // ✅ Mettre à jour l'image
+            item.image = metadata.imageData
+
+            print("✅ Métadonnées extraites: \(item.title), prix: \(item.price ?? 0)€")
+        }
+
+        // ✅ Synchroniser avec Supabase
+        do {
+            try await updateItem(item)
+            print("✅ Item mis à jour avec les métadonnées")
+        } catch {
+            print("❌ Erreur lors de la mise à jour: \(error)")
+            // Ne pas bloquer si la sync échoue, l'item est au moins mis à jour localement
+        }
+    }
 }

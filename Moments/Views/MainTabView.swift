@@ -142,6 +142,7 @@ struct MainTabView: View {
     }
 
     /// Importe les produits en attente depuis la Share Extension
+    /// ✅ NOUVELLE LOGIQUE : Import immédiat + extraction des métadonnées en arrière-plan
     private func importPendingWishlistItems() {
         guard let manager = wishlistManager else {
             print("⚠️ WishlistManager non initialisé")
@@ -163,30 +164,34 @@ struct MainTabView: View {
                     // Trouver l'événement associé
                     let event = allMyEvents.first(where: { $0.id == pendingItem.eventId })
 
-                    // Créer le WishlistItem
+                    // ✅ Créer un item placeholder avec juste l'URL
                     let wishlistItem = WishlistItem(
-                        title: pendingItem.title ?? "Produit",
+                        title: "Chargement...", // Placeholder qui sera mis à jour
                         itemDescription: nil,
-                        price: pendingItem.price,
+                        price: nil, // Sera mis à jour en arrière-plan
                         url: pendingItem.url,
-                        image: pendingItem.imageData,
+                        image: nil, // Sera mis à jour en arrière-plan
                         category: .autre,
                         status: .wanted,
-                        priority: pendingItem.priority,
+                        priority: 3, // Priorité par défaut
                         contact: nil,
                         myEvent: event
                     )
 
-                    // Associer à l'événement
                     if let event = event {
                         print("✅ Produit associé à l'événement: \(event.title)")
                     } else {
                         print("⚠️ Aucun événement trouvé pour le produit")
                     }
 
-                    // ✅ Sauvegarder avec WishlistManager (synchronise avec Supabase)
+                    // ✅ Sauvegarder immédiatement (local + Supabase)
                     try await manager.addItem(wishlistItem)
-                    print("✅ Produit importé et synchronisé: \(wishlistItem.title)")
+                    print("✅ Produit importé: \(wishlistItem.title)")
+
+                    // ✅ Lancer l'extraction en arrière-plan (ne bloque pas)
+                    Task.detached(priority: .background) {
+                        await manager.fetchAndUpdateMetadata(for: wishlistItem, from: pendingItem.url)
+                    }
 
                 } catch {
                     print("❌ Erreur lors de l'import du produit: \(error)")
