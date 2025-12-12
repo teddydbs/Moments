@@ -71,16 +71,8 @@ struct AddEditWishlistItemView: View {
                                     .textContentType(.URL)
                                     .autocapitalization(.none)
                                     .keyboardType(.URL)
-                                    .onChange(of: url) { oldValue, newValue in
-                                        // ✅ Auto-fill AUTOMATIQUE dès qu'on entre une URL valide
-                                        if isValidURL(newValue) && !isAutoFilling {
-                                            Task {
-                                                await autoFillFromURL()
-                                            }
-                                        }
-                                    }
 
-                                // ✅ Bouton Coller
+                                // ✅ Bouton Coller OU Charger
                                 if url.isEmpty {
                                     Button {
                                         // Récupérer le contenu du presse-papiers
@@ -92,6 +84,19 @@ struct AddEditWishlistItemView: View {
                                             .font(.subheadline)
                                             .foregroundStyle(MomentsTheme.primaryGradient)
                                     }
+                                } else if isValidURL(url) {
+                                    Button {
+                                        autoFillFromURLInstant()
+                                    } label: {
+                                        if isAutoFilling {
+                                            ProgressView()
+                                                .scaleEffect(0.7)
+                                        } else {
+                                            Image(systemName: "arrow.down.circle")
+                                                .foregroundStyle(MomentsTheme.primaryGradient)
+                                        }
+                                    }
+                                    .disabled(isAutoFilling)
                                 }
                             }
 
@@ -272,37 +277,45 @@ struct AddEditWishlistItemView: View {
         return url.scheme == "http" || url.scheme == "https"
     }
 
-    /// Remplit automatiquement les champs depuis l'URL
-    /// ✅ OPTIMISÉ : Timeout rapide, image chargée en arrière-plan
-    private func autoFillFromURL() async {
+    /// ✅ NOUVEAU : Remplissage INSTANTANÉ - Lance le chargement en arrière-plan
+    /// L'utilisateur peut continuer à utiliser l'app, les champs se remplissent progressivement
+    private func autoFillFromURLInstant() {
         isAutoFilling = true
 
-        // ✅ Récupérer métadonnées avec timeout rapide
-        if let metadata = await metadataFetcher.fetchMetadata(from: url) {
-            // ✅ Remplir titre et prix immédiatement
-            if let productTitle = metadata.title {
-                title = productTitle
-            }
+        // 🚀 Lancer le chargement EN ARRIÈRE-PLAN (ne bloque pas l'UI)
+        Task {
+            // ✅ Récupérer métadonnées
+            if let metadata = await metadataFetcher.fetchMetadata(from: url) {
+                // ✅ Mettre à jour l'UI progressivement
+                await MainActor.run {
+                    if let productTitle = metadata.title {
+                        title = productTitle
+                    }
 
-            if let productPrice = metadata.price {
-                price = String(format: "%.2f", productPrice)
-            }
+                    if let productPrice = metadata.price {
+                        price = String(format: "%.2f", productPrice)
+                    }
 
-            // ✅ Image (si disponible rapidement, sinon tant pis)
-            if let productImageData = metadata.imageData {
-                imageData = productImageData
-            }
+                    if let productImageData = metadata.imageData {
+                        imageData = productImageData
+                    }
 
-            // ✅ Feedback haptique de succès
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
-        } else {
-            // ❌ Échec: feedback haptique d'erreur
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.error)
+                    // Feedback haptique de succès
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+
+                    isAutoFilling = false
+                }
+            } else {
+                await MainActor.run {
+                    // Feedback haptique d'erreur
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.error)
+
+                    isAutoFilling = false
+                }
+            }
         }
-
-        isAutoFilling = false
     }
 
     private func loadItemData() {
@@ -320,8 +333,8 @@ struct AddEditWishlistItemView: View {
     private func saveWishlistItem() {
         let priceDouble = Double(price.replacingOccurrences(of: ",", with: "."))
 
-        // ✅ Si pas de titre récupéré, utiliser un titre par défaut
-        let finalTitle = title.isEmpty ? "Produit" : title
+        // ✅ Titre par défaut si vide (sera mis à jour en arrière-plan)
+        let finalTitle = title.isEmpty ? "Chargement..." : title
 
         Task {
             do {
