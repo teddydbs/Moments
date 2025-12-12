@@ -273,12 +273,13 @@ struct AddEditWishlistItemView: View {
     }
 
     /// Remplit automatiquement les champs depuis l'URL
+    /// ✅ OPTIMISÉ : Timeout rapide, image chargée en arrière-plan
     private func autoFillFromURL() async {
         isAutoFilling = true
 
-        // ❓ POURQUOI: On récupère les métadonnées du produit depuis l'URL
+        // ✅ Récupérer métadonnées avec timeout rapide
         if let metadata = await metadataFetcher.fetchMetadata(from: url) {
-            // ✅ Remplir TOUS les champs automatiquement (nouvelle URL = nouvelles infos)
+            // ✅ Remplir titre et prix immédiatement
             if let productTitle = metadata.title {
                 title = productTitle
             }
@@ -287,6 +288,7 @@ struct AddEditWishlistItemView: View {
                 price = String(format: "%.2f", productPrice)
             }
 
+            // ✅ Image (si disponible rapidement, sinon tant pis)
             if let productImageData = metadata.imageData {
                 imageData = productImageData
             }
