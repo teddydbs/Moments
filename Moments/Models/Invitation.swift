@@ -50,6 +50,26 @@ class Invitation {
     /// Nombre de personnes accompagnantes (+1, famille, etc.)
     var plusOnes: Int
 
+    // MARK: - Supabase Sync Fields
+
+    /// Token de partage unique (généré par Supabase)
+    var shareToken: String?
+
+    /// URL de partage complète (généré par l'app)
+    var shareUrl: String?
+
+    /// ID de l'organisateur (celui qui invite) - référence Supabase
+    var inviterId: UUID?
+
+    /// ID de l'invité s'il a un compte Moments - référence Supabase
+    var inviteeUserId: UUID?
+
+    /// Indique si l'invitation a été synchronisée avec Supabase
+    var isSynced: Bool
+
+    /// Date de dernière synchronisation avec Supabase
+    var lastSyncedAt: Date?
+
     /// Date de création
     var createdAt: Date
 
@@ -115,6 +135,12 @@ class Invitation {
         respondedAt: Date? = nil,
         guestMessage: String? = nil,
         plusOnes: Int = 0,
+        shareToken: String? = nil,
+        shareUrl: String? = nil,
+        inviterId: UUID? = nil,
+        inviteeUserId: UUID? = nil,
+        isSynced: Bool = false,
+        lastSyncedAt: Date? = nil,
         myEvent: MyEvent? = nil,
         contact: Contact? = nil,
         createdAt: Date = Date(),
@@ -129,6 +155,12 @@ class Invitation {
         self.respondedAt = respondedAt
         self.guestMessage = guestMessage
         self.plusOnes = plusOnes
+        self.shareToken = shareToken
+        self.shareUrl = shareUrl
+        self.inviterId = inviterId
+        self.inviteeUserId = inviteeUserId
+        self.isSynced = isSynced
+        self.lastSyncedAt = lastSyncedAt
         self.myEvent = myEvent
         self.contact = contact
         self.createdAt = createdAt
