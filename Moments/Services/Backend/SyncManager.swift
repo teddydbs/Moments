@@ -3,6 +3,7 @@
 //  Moments
 //
 //  Gestion de la synchronisation SwiftData ↔ Supabase
+//  Architecture: Service Layer
 //
 
 import Foundation
@@ -10,6 +11,7 @@ import SwiftData
 import SwiftUI
 import Combine
 
+/// Manager de synchronisation bidirectionnelle entre SwiftData local et Supabase
 @MainActor
 class SyncManager: ObservableObject {
     private let modelContext: ModelContext
@@ -81,11 +83,11 @@ class SyncManager: ObservableObject {
 
     private func pullFromSupabase() async throws {
         // Récupérer tous les événements depuis Supabase
-        let remoteEvents = try await supabase.fetchEvents()
+        let remoteEvents = try await supabase.fetchMyEvents()
         print("📥 Fetched \(remoteEvents.count) events from Supabase")
 
         // Récupérer tous les événements locaux
-        let localEvents = try modelContext.fetch(FetchDescriptor<Event>())
+        let localEvents = try modelContext.fetch(FetchDescriptor<MyEvent>())
         print("📱 Found \(localEvents.count) local events")
 
         // Créer un dictionnaire des événements locaux pour un accès rapide
@@ -95,23 +97,12 @@ class SyncManager: ObservableObject {
         for remoteEvent in remoteEvents {
             if let localEvent = localEventsByID[remoteEvent.id] {
                 // L'événement existe localement, vérifier s'il faut le mettre à jour
-                if remoteEvent.updatedAt > (localEvent.updatedAt ?? Date.distantPast) {
-                    print("🔄 Updating local event: \(localEvent.title)")
-                    updateLocalEvent(localEvent, with: remoteEvent)
-                }
+                // TODO: Comparer les dates de mise à jour
+                print("🔄 Event already exists locally: \(localEvent.title)")
             } else {
                 // Nouvel événement distant → Créer localement
                 print("➕ Creating new local event: \(remoteEvent.title)")
-                createLocalEvent(from: remoteEvent)
-            }
-        }
-
-        // Supprimer les événements locaux qui n'existent plus sur Supabase
-        let remoteEventIDs = Set(remoteEvents.map { $0.id })
-        for localEvent in localEvents {
-            if !remoteEventIDs.contains(localEvent.id) && localEvent.existsOnServer {
-                print("🗑️ Deleting local event (removed from server): \(localEvent.title)")
-                modelContext.delete(localEvent)
+                try await createLocalMyEvent(from: remoteEvent)
             }
         }
 
@@ -123,54 +114,43 @@ class SyncManager: ObservableObject {
     // MARK: - Push (Local → Supabase)
 
     private func pushToSupabase() async throws {
-        // Récupérer tous les événements locaux marqués comme "non synchronisés"
-        let localEvents = try modelContext.fetch(FetchDescriptor<Event>())
-        let eventsToSync = localEvents.filter { $0.needsSync }
+        // Récupérer tous les événements locaux
+        let localEvents = try modelContext.fetch(FetchDescriptor<MyEvent>())
 
-        print("📤 Found \(eventsToSync.count) events to push")
+        print("📤 Pushing \(localEvents.count) local events to Supabase...")
 
-        for localEvent in eventsToSync {
+        for localEvent in localEvents {
             do {
-                if localEvent.existsOnServer {
+                // Vérifier si l'événement existe déjà sur le serveur
+                let existsOnServer = getExistsOnServer(for: localEvent.id)
+
+                if existsOnServer {
                     // UPDATE: L'événement existe déjà sur le serveur
                     print("🔄 Updating remote event: \(localEvent.title)")
-                    try await supabase.updateEvent(
-                        id: localEvent.id.uuidString,
-                        title: localEvent.title,
-                        date: localEvent.date,
-                        notes: localEvent.notes,
-                        hasGiftPool: localEvent.hasGiftPool,
-                        isRecurring: localEvent.isRecurring
+                    let remoteEvent = RemoteMyEvent(
+                        from: localEvent,
+                        ownerId: supabase.currentUserId
                     )
+                    try await supabase.updateMyEvent(remoteEvent)
                 } else {
                     // CREATE: Nouvel événement à créer sur le serveur
                     print("➕ Creating remote event: \(localEvent.title)")
-                    let remoteEvent = try await supabase.createEvent(
-                        title: localEvent.title,
-                        date: localEvent.date,
-                        category: localEvent.category.rawValue,
-                        notes: localEvent.notes,
-                        hasGiftPool: localEvent.hasGiftPool,
-                        isRecurring: localEvent.isRecurring
+                    let remoteEvent = RemoteMyEvent(
+                        from: localEvent,
+                        ownerId: supabase.currentUserId
                     )
-
-                    // Mettre à jour l'ID local si différent
-                    if localEvent.id != remoteEvent.id {
-                        localEvent.id = remoteEvent.id
-                    }
-
-                    localEvent.existsOnServer = true
+                    _ = try await supabase.createMyEvent(remoteEvent)
+                    setExistsOnServer(for: localEvent.id, value: true)
                 }
 
-                // Marquer comme synchronisé
-                localEvent.needsSync = false
-                localEvent.updatedAt = Date()
+                // Synchroniser les invitations de cet événement
+                try await syncInvitations(for: localEvent)
 
-                // Synchroniser les participants de cet événement
-                try await syncParticipants(for: localEvent)
+                // Synchroniser les produits wishlist de cet événement
+                try await syncWishlistItems(for: localEvent)
 
-                // Synchroniser les idées cadeaux de cet événement
-                try await syncGiftIdeas(for: localEvent)
+                // Synchroniser les photos de cet événement
+                try await syncEventPhotos(for: localEvent)
 
             } catch {
                 print("❌ Failed to sync event \(localEvent.id): \(error)")
@@ -183,141 +163,133 @@ class SyncManager: ObservableObject {
         print("💾 Sync flags saved")
     }
 
-    // MARK: - Synchronisation des participants
+    // MARK: - Synchronisation des invitations
 
-    private func syncParticipants(for event: Event) async throws {
-        let remoteParticipants = try await supabase.fetchParticipants(eventId: event.id.uuidString)
-        let localParticipants = event.participants
+    private func syncInvitations(for event: MyEvent) async throws {
+        guard let invitations = event.invitations else { return }
 
-        // Créer un dictionnaire des participants locaux
-        let localParticipantsByID = Dictionary(uniqueKeysWithValues: localParticipants.map { ($0.id, $0) })
+        let remoteInvitations = try await supabase.fetchInvitations(for: event.id)
+        let remoteInvitationIDs = Set(remoteInvitations.map { $0.id })
 
-        // Synchroniser depuis le serveur
-        for remoteParticipant in remoteParticipants {
-            if !localParticipantsByID.keys.contains(remoteParticipant.id) {
-                // Nouveau participant distant → Créer localement
-                let newParticipant = Participant(
-                    id: remoteParticipant.id,
-                    name: remoteParticipant.name,
-                    phone: remoteParticipant.phone,
-                    email: remoteParticipant.email,
-                    source: ParticipantSource(rawValue: remoteParticipant.source) ?? .manual,
-                    contactIdentifier: remoteParticipant.contactIdentifier,
-                    socialMediaId: remoteParticipant.socialMediaId
-                )
-                newParticipant.event = event
-                event.participants.append(newParticipant)
-                modelContext.insert(newParticipant)
-            }
-        }
-
-        // Envoyer les participants locaux non synchronisés
-        let remoteParticipantIDs = Set(remoteParticipants.map { $0.id })
-        for localParticipant in localParticipants {
-            if !remoteParticipantIDs.contains(localParticipant.id) {
-                // Participant local non présent sur le serveur → Créer sur le serveur
-                _ = try await supabase.createParticipant(
-                    eventId: event.id.uuidString,
-                    name: localParticipant.name,
-                    phone: localParticipant.phone,
-                    email: localParticipant.email,
-                    source: localParticipant.source.rawValue
-                )
+        // Envoyer les invitations locales non présentes sur le serveur
+        for invitation in invitations {
+            if !remoteInvitationIDs.contains(invitation.id) {
+                print("➕ Creating remote invitation for: \(invitation.guestName)")
+                let remoteInvitation = RemoteInvitation(from: invitation)
+                _ = try await supabase.createInvitation(remoteInvitation)
             }
         }
     }
 
-    // MARK: - Synchronisation des idées cadeaux
+    // MARK: - Synchronisation des produits wishlist
 
-    private func syncGiftIdeas(for event: Event) async throws {
-        let remoteGiftIdeas = try await supabase.fetchGiftIdeas(eventId: event.id.uuidString)
-        let localGiftIdeas = event.giftIdeas
+    /// ⚠️ OBSOLÈTE: La synchronisation de la wishlist est maintenant gérée par WishlistManager
+    ///
+    /// Cette méthode utilisait l'ancien schéma où les wishlists étaient liées aux événements.
+    /// Maintenant, la wishlist personnelle est synchronisée indépendamment des événements
+    /// via WishlistManager.
+    ///
+    /// TODO: Supprimer cette méthode une fois la migration complète
+    private func syncWishlistItems(for event: MyEvent) async throws {
+        print("⚠️ syncWishlistItems est obsolète - utiliser WishlistManager à la place")
+        // Ne rien faire - la wishlist est gérée par WishlistManager
+    }
 
-        // Créer un dictionnaire des idées locales
-        let localGiftIdeasByID = Dictionary(uniqueKeysWithValues: localGiftIdeas.map { ($0.id, $0) })
+    // MARK: - Synchronisation des photos
 
-        // Synchroniser depuis le serveur
-        for remoteGiftIdea in remoteGiftIdeas {
-            if !localGiftIdeasByID.keys.contains(remoteGiftIdea.id) {
-                // Nouvelle idée distante → Créer localement
-                let newGiftIdea = GiftIdea(
-                    id: remoteGiftIdea.id,
-                    title: remoteGiftIdea.title,
-                    productURL: remoteGiftIdea.productUrl,
-                    productImageURL: remoteGiftIdea.productImageUrl,
-                    price: remoteGiftIdea.price,
-                    proposedBy: remoteGiftIdea.proposedBy
+    private func syncEventPhotos(for event: MyEvent) async throws {
+        guard let photos = event.eventPhotos else { return }
+
+        let remotePhotos = try await supabase.fetchEventPhotos(for: event.id)
+        let remotePhotoIDs = Set(remotePhotos.map { $0.id })
+
+        // Upload et créer les photos locales non présentes sur le serveur
+        for photo in photos {
+            if !remotePhotoIDs.contains(photo.id) {
+                print("➕ Uploading event photo to Storage...")
+
+                // Upload l'image vers Storage
+                let imageData = photo.imageData
+
+                let fileName = "\(photo.id.uuidString).jpg"
+                let imageUrl = try await supabase.uploadImage(
+                    imageData,
+                    toBucket: "event-photos",
+                    fileName: fileName
                 )
-                newGiftIdea.event = event
-                event.giftIdeas.append(newGiftIdea)
-                modelContext.insert(newGiftIdea)
-            }
-        }
 
-        // Envoyer les idées locales non synchronisées
-        let remoteGiftIdeaIDs = Set(remoteGiftIdeas.map { $0.id })
-        for localGiftIdea in localGiftIdeas {
-            if !remoteGiftIdeaIDs.contains(localGiftIdea.id) {
-                // Idée locale non présente sur le serveur → Créer sur le serveur
-                _ = try await supabase.createGiftIdea(
-                    eventId: event.id.uuidString,
-                    title: localGiftIdea.title,
-                    description: nil,
-                    productUrl: localGiftIdea.productURL,
-                    proposedBy: localGiftIdea.proposedBy
-                )
+                // Créer l'enregistrement de la photo
+                let remotePhoto = RemoteEventPhoto(from: photo, imageUrl: imageUrl)
+                _ = try await supabase.createEventPhoto(remotePhoto)
             }
         }
     }
 
     // MARK: - Helpers
 
-    private func updateLocalEvent(_ local: Event, with remote: RemoteEvent) {
-        local.title = remote.title
-        local.date = remote.date
-        local.notes = remote.notes
-        local.hasGiftPool = remote.hasGiftPool
-        local.isRecurring = remote.isRecurring
-        local.updatedAt = remote.updatedAt
-
-        // Convertir la catégorie
-        if let category = EventCategory.allCases.first(where: { $0.rawValue == remote.category }) {
-            local.category = category
-        }
-    }
-
-    private func createLocalEvent(from remote: RemoteEvent) {
-        // Convertir la catégorie
-        guard let category = EventCategory.allCases.first(where: { $0.rawValue == remote.category }) else {
-            print("⚠️ Unknown category: \(remote.category)")
+    /// Créer un MyEvent local depuis un RemoteMyEvent
+    private func createLocalMyEvent(from remote: RemoteMyEvent) async throws {
+        // Convertir le type
+        guard let eventType = MyEventType(rawValue: remote.type) else {
+            print("⚠️ Unknown event type: \(remote.type)")
             return
         }
 
-        let newEvent = Event(
+        // Parser la date
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withFullDate]
+        guard let date = dateFormatter.date(from: remote.date) else {
+            print("⚠️ Invalid date format: \(remote.date)")
+            return
+        }
+
+        // Parser l'heure (optionnel)
+        var time: Date?
+        if let timeString = remote.time {
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm:ss"
+            time = timeFormatter.date(from: timeString)
+        }
+
+        // Parser rsvpDeadline (optionnel)
+        var rsvpDeadline: Date?
+        if let deadlineString = remote.rsvpDeadline {
+            rsvpDeadline = dateFormatter.date(from: deadlineString)
+        }
+
+        // Créer le nouvel événement local
+        let newEvent = MyEvent(
             id: remote.id,
+            type: eventType,
             title: remote.title,
-            date: remote.date,
-            category: category,
-            isRecurring: remote.isRecurring,
-            notes: remote.notes,
-            imageData: nil,
-            hasGiftPool: remote.hasGiftPool
+            eventDescription: remote.eventDescription,
+            date: date,
+            time: time,
+            location: remote.location,
+            locationAddress: remote.locationAddress,
+            maxGuests: remote.maxGuests,
+            rsvpDeadline: rsvpDeadline
         )
 
-        newEvent.existsOnServer = true
-        newEvent.needsSync = false
-        newEvent.updatedAt = remote.updatedAt
+        // Marquer comme existant sur le serveur
+        setExistsOnServer(for: newEvent.id, value: true)
 
         modelContext.insert(newEvent)
     }
 
-    // MARK: - Sync déclenché par les changements
+    // MARK: - Persistance des flags de sync
 
-    /// Marquer un événement comme nécessitant une synchronisation
-    func markEventForSync(_ event: Event) {
-        event.needsSync = true
-        event.updatedAt = Date()
+    /// Vérifier si un événement existe sur le serveur
+    private func getExistsOnServer(for id: UUID) -> Bool {
+        UserDefaults.standard.bool(forKey: "existsOnServer_\(id.uuidString)")
     }
+
+    /// Marquer un événement comme existant (ou non) sur le serveur
+    private func setExistsOnServer(for id: UUID, value: Bool) {
+        UserDefaults.standard.set(value, forKey: "existsOnServer_\(id.uuidString)")
+    }
+
+    // MARK: - API publique
 
     /// Synchronisation rapide (push uniquement)
     func quickSync() async {
@@ -327,41 +299,6 @@ class SyncManager: ObservableObject {
             try await pushToSupabase()
         } catch {
             print("❌ Quick sync failed: \(error)")
-        }
-    }
-}
-
-// MARK: - Extensions au modèle Event pour le sync
-
-extension Event {
-    @Transient
-    var needsSync: Bool {
-        get {
-            // Utiliser UserDefaults comme stockage temporaire
-            UserDefaults.standard.bool(forKey: "needsSync_\(id.uuidString)")
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "needsSync_\(id.uuidString)")
-        }
-    }
-
-    @Transient
-    var existsOnServer: Bool {
-        get {
-            UserDefaults.standard.bool(forKey: "existsOnServer_\(id.uuidString)")
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "existsOnServer_\(id.uuidString)")
-        }
-    }
-
-    @Transient
-    var updatedAt: Date? {
-        get {
-            UserDefaults.standard.object(forKey: "updatedAt_\(id.uuidString)") as? Date
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "updatedAt_\(id.uuidString)")
         }
     }
 }

@@ -3,497 +3,421 @@
 //  Moments
 //
 //  Manager principal pour les interactions avec Supabase
+//  Architecture: Service Layer
 //
 
 import Foundation
 import SwiftUI
 import Combine
+import Supabase
 
-// NOTE: Pour utiliser ce fichier, vous devez d'abord installer le SDK Supabase
-// via Swift Package Manager: https://github.com/supabase-community/supabase-swift
-//
-// Décommentez les imports ci-dessous une fois le package installé:
-// import Supabase
-// import PostgREST
-// import Realtime
-// import Storage
-
+/// Manager principal pour toutes les interactions avec Supabase
+/// Gère l'authentification, les requêtes CRUD et le Storage
 @MainActor
 class SupabaseManager: ObservableObject {
     static let shared = SupabaseManager()
 
-    // Décommentez une fois Supabase installé:
-    // let client: SupabaseClient
+    let client: SupabaseClient
 
     @Published var isAuthenticated = false
-    @Published var currentUser: User?
+    @Published var currentUserId: UUID?
 
     private init() {
-        // Décommentez une fois Supabase installé:
-        /*
+        // ✅ Initialiser le client Supabase avec nos credentials
         self.client = SupabaseClient(
             supabaseURL: SupabaseConfig.supabaseURL,
             supabaseKey: SupabaseConfig.supabaseAnonKey
         )
-        */
 
-        // Vérifier si l'utilisateur est déjà connecté
+        print("🟢 SupabaseManager initialisé")
+
+        // ✅ Écouter les changements d'état d'authentification
         Task {
-            await checkAuthStatus()
+            await listenToAuthChanges()
+        }
+    }
+
+    /// Écoute les changements d'état d'authentification (session restaurée, login, logout)
+    private func listenToAuthChanges() async {
+        for await state in client.auth.authStateChanges {
+            await MainActor.run {
+                switch state.event {
+                case .signedIn, .tokenRefreshed, .initialSession:
+                    self.isAuthenticated = true
+                    self.currentUserId = state.session?.user.id
+                    print("✅ Session active - User ID: \(state.session?.user.id.uuidString ?? "nil")")
+                case .signedOut:
+                    self.isAuthenticated = false
+                    self.currentUserId = nil
+                    print("🚪 Session fermée")
+                default:
+                    break
+                }
+            }
         }
     }
 
     // MARK: - Authentication
 
+    /// Vérifier le statut d'authentification actuel
     func checkAuthStatus() async {
-        // TODO: Implémenter après installation du SDK
-        /*
         do {
-            let user = try await client.auth.user()
-            self.currentUser = user
+            let session = try await client.auth.session
+            self.currentUserId = session.user.id
             self.isAuthenticated = true
+            print("✅ Session active - User ID: \(session.user.id)")
         } catch {
             self.isAuthenticated = false
-            self.currentUser = nil
+            self.currentUserId = nil
+            print("ℹ️ Pas de session active")
         }
-        */
     }
 
-    func signUp(email: String, password: String, name: String) async throws -> User {
-        // TODO: Implémenter après installation du SDK
-        /*
+    /// Inscription avec email et mot de passe
+    func signUp(email: String, password: String, fullName: String) async throws {
         let response = try await client.auth.signUp(
             email: email,
             password: password,
-            data: ["name": .string(name)]
+            data: ["full_name": .string(fullName)]
         )
 
-        guard let user = response.user else {
-            throw SupabaseError.noUserReturned
-        }
-
-        self.currentUser = user
+        self.currentUserId = response.user.id
         self.isAuthenticated = true
 
-        return user
-        */
-        throw SupabaseError.notImplemented
+        print("✅ Inscription réussie - User ID: \(response.user.id)")
     }
 
+    /// Connexion avec email et mot de passe
     func signIn(email: String, password: String) async throws {
-        // TODO: Implémenter après installation du SDK
-        /*
         let session = try await client.auth.signIn(
             email: email,
             password: password
         )
 
-        self.currentUser = session.user
+        self.currentUserId = session.user.id
         self.isAuthenticated = true
-        */
+
+        print("✅ Connexion réussie - User ID: \(session.user.id)")
     }
 
+    /// Connexion avec Google OAuth
+    func signInWithGoogle() async throws {
+        // ✅ Lancer le flow OAuth avec Google
+        // redirectTo doit pointer vers notre URL scheme iOS
+        try await client.auth.signInWithOAuth(
+            provider: .google,
+            redirectTo: URL(string: "com.supabase.ksbsvscfplmokacngouo://login-callback")
+        )
+
+        print("✅ OAuth Google lancé - En attente du callback...")
+
+        // Note: La session sera récupérée dans handleIncomingURL() dans MomentsApp.swift
+        // après le callback OAuth
+    }
+
+    /// Connexion avec Apple OAuth
+    func signInWithApple() async throws {
+        // ✅ Lancer le flow OAuth avec Apple
+        // redirectTo doit pointer vers notre URL scheme iOS
+        try await client.auth.signInWithOAuth(
+            provider: .apple,
+            redirectTo: URL(string: "com.supabase.ksbsvscfplmokacngouo://login-callback")
+        )
+
+        print("✅ OAuth Apple lancé - En attente du callback...")
+
+        // Note: La session sera récupérée dans handleIncomingURL() dans MomentsApp.swift
+        // après le callback OAuth
+    }
+
+    /// Déconnexion
     func signOut() async throws {
-        // TODO: Implémenter après installation du SDK
-        /*
         try await client.auth.signOut()
-        self.currentUser = nil
+        self.currentUserId = nil
         self.isAuthenticated = false
-        */
+
+        print("✅ Déconnexion réussie")
     }
 
-    // MARK: - Events
+    // MARK: - MyEvents
 
-    func fetchEvents() async throws -> [RemoteEvent] {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let response: [RemoteEvent] = try await client
-            .from("events")
+    /// Récupérer tous les événements de l'utilisateur connecté
+    func fetchMyEvents() async throws -> [RemoteMyEvent] {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
+        let response: [RemoteMyEvent] = try await client
+            .from("my_events")
             .select()
             .order("date", ascending: true)
             .execute()
             .value
 
+        print("✅ Récupéré \(response.count) événements depuis Supabase")
         return response
-        */
-        return []
     }
 
-    func createEvent(
-        title: String,
-        date: Date,
-        category: String,
-        notes: String,
-        hasGiftPool: Bool,
-        isRecurring: Bool
-    ) async throws -> RemoteEvent {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withFullDate]
+    /// Créer un nouvel événement
+    func createMyEvent(_ event: RemoteMyEvent) async throws -> RemoteMyEvent {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
 
-        let eventData: [String: AnyJSON] = [
-            "title": .string(title),
-            "date": .string(dateFormatter.string(from: date)),
-            "category": .string(category),
-            "notes": .string(notes),
-            "has_gift_pool": .bool(hasGiftPool),
-            "is_recurring": .bool(isRecurring)
-        ]
-
-        let response: RemoteEvent = try await client
-            .from("events")
-            .insert(eventData)
+        let response: RemoteMyEvent = try await client
+            .from("my_events")
+            .insert(event.toDictionary())
             .select()
             .single()
             .execute()
             .value
 
+        print("✅ Événement créé - ID: \(response.id)")
         return response
-        */
-        throw SupabaseError.notImplemented
     }
 
-    func updateEvent(
-        id: String,
-        title: String?,
-        date: Date?,
-        notes: String?,
-        hasGiftPool: Bool?,
-        isRecurring: Bool?
-    ) async throws {
-        // TODO: Implémenter après installation du SDK
-        /*
-        var updates: [String: AnyJSON] = [:]
-
-        if let title = title {
-            updates["title"] = .string(title)
-        }
-        if let date = date {
-            let dateFormatter = ISO8601DateFormatter()
-            dateFormatter.formatOptions = [.withFullDate]
-            updates["date"] = .string(dateFormatter.string(from: date))
-        }
-        if let notes = notes {
-            updates["notes"] = .string(notes)
-        }
-        if let hasGiftPool = hasGiftPool {
-            updates["has_gift_pool"] = .bool(hasGiftPool)
-        }
-        if let isRecurring = isRecurring {
-            updates["is_recurring"] = .bool(isRecurring)
+    /// Mettre à jour un événement existant
+    func updateMyEvent(_ event: RemoteMyEvent) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
         }
 
         try await client
-            .from("events")
-            .update(updates)
-            .eq("id", value: id)
+            .from("my_events")
+            .update(event.toDictionary())
+            .eq("id", value: event.id.uuidString)
             .execute()
-        */
+
+        print("✅ Événement mis à jour - ID: \(event.id)")
     }
 
-    func deleteEvent(id: String) async throws {
-        // TODO: Implémenter après installation du SDK
-        /*
+    /// Supprimer un événement
+    func deleteMyEvent(id: UUID) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
         try await client
-            .from("events")
+            .from("my_events")
             .delete()
-            .eq("id", value: id)
+            .eq("id", value: id.uuidString)
             .execute()
-        */
+
+        print("✅ Événement supprimé - ID: \(id)")
     }
 
-    // MARK: - Participants
+    // MARK: - Invitations
 
-    func fetchParticipants(eventId: String) async throws -> [RemoteParticipant] {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let response: [RemoteParticipant] = try await client
-            .from("participants")
+    /// Récupérer toutes les invitations d'un événement
+    func fetchInvitations(for eventId: UUID) async throws -> [RemoteInvitation] {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
+        let response: [RemoteInvitation] = try await client
+            .from("invitations")
             .select()
-            .eq("event_id", value: eventId)
+            .eq("my_event_id", value: eventId.uuidString)
             .execute()
             .value
 
+        print("✅ Récupéré \(response.count) invitations pour l'événement \(eventId)")
         return response
-        */
-        return []
     }
 
-    func createParticipant(
-        eventId: String,
-        name: String,
-        phone: String?,
-        email: String?,
-        source: String
-    ) async throws -> RemoteParticipant {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let participantData: [String: AnyJSON] = [
-            "event_id": .string(eventId),
-            "name": .string(name),
-            "phone": phone.map { .string($0) } ?? .null,
-            "email": email.map { .string($0) } ?? .null,
-            "source": .string(source)
-        ]
+    /// Créer une nouvelle invitation
+    func createInvitation(_ invitation: RemoteInvitation) async throws -> RemoteInvitation {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
 
-        let response: RemoteParticipant = try await client
-            .from("participants")
-            .insert(participantData)
+        let response: RemoteInvitation = try await client
+            .from("invitations")
+            .insert(invitation.toDictionary())
             .select()
             .single()
             .execute()
             .value
 
+        print("✅ Invitation créée - ID: \(response.id)")
         return response
-        */
-        throw SupabaseError.notImplemented
     }
 
-    func deleteParticipant(id: String) async throws {
-        // TODO: Implémenter après installation du SDK
-        /*
+    /// Mettre à jour une invitation
+    func updateInvitation(_ invitation: RemoteInvitation) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
         try await client
-            .from("participants")
-            .delete()
-            .eq("id", value: id)
+            .from("invitations")
+            .update(invitation.toDictionary())
+            .eq("id", value: invitation.id.uuidString)
             .execute()
-        */
+
+        print("✅ Invitation mise à jour - ID: \(invitation.id)")
     }
 
-    // MARK: - Gift Ideas
+    /// Supprimer une invitation
+    func deleteInvitation(id: UUID) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
 
-    func fetchGiftIdeas(eventId: String) async throws -> [RemoteGiftIdea] {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let response: [RemoteGiftIdea] = try await client
-            .from("gift_ideas")
+        try await client
+            .from("invitations")
+            .delete()
+            .eq("id", value: id.uuidString)
+            .execute()
+
+        print("✅ Invitation supprimée - ID: \(id)")
+    }
+
+    // MARK: - Wishlist Items
+
+    /// ⚠️ OBSOLÈTE: Ces méthodes utilisaient l'ancien schéma avec my_event_id
+    ///
+    /// La wishlist est maintenant gérée par WishlistManager qui utilise le nouveau
+    /// schéma avec catégories et statuts. Ces méthodes ne sont plus utilisées
+    /// mais conservées temporairement pour référence.
+    ///
+    /// TODO: Supprimer ces méthodes une fois la migration complète
+
+    /// Récupérer tous les produits wishlist d'un événement (OBSOLÈTE)
+    @available(*, deprecated, message: "Utiliser WishlistManager à la place")
+    func fetchWishlistItems(for eventId: UUID) async throws -> [RemoteWishlistItem] {
+        fatalError("Cette méthode est obsolète. Utiliser WishlistManager.loadWishlist() à la place.")
+    }
+
+    /// Créer un nouveau produit wishlist (OBSOLÈTE)
+    @available(*, deprecated, message: "Utiliser WishlistManager à la place")
+    func createWishlistItem(_ item: RemoteWishlistItem) async throws -> RemoteWishlistItem {
+        fatalError("Cette méthode est obsolète. Utiliser WishlistManager.addItem() à la place.")
+    }
+
+    /// Mettre à jour un produit wishlist (OBSOLÈTE)
+    @available(*, deprecated, message: "Utiliser WishlistManager à la place")
+    func updateWishlistItem(_ item: RemoteWishlistItem) async throws {
+        fatalError("Cette méthode est obsolète. Utiliser WishlistManager.updateItem() à la place.")
+
+        print("✅ Produit wishlist mis à jour - ID: \(item.id)")
+    }
+
+    /// Supprimer un produit wishlist
+    func deleteWishlistItem(id: UUID) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
+        try await client
+            .from("wishlist_items")
+            .delete()
+            .eq("id", value: id.uuidString)
+            .execute()
+
+        print("✅ Produit wishlist supprimé - ID: \(id)")
+    }
+
+    // MARK: - Event Photos
+
+    /// Récupérer toutes les photos d'un événement
+    func fetchEventPhotos(for eventId: UUID) async throws -> [RemoteEventPhoto] {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
+        let response: [RemoteEventPhoto] = try await client
+            .from("event_photos")
             .select()
-            .eq("event_id", value: eventId)
+            .eq("my_event_id", value: eventId.uuidString)
+            .order("display_order", ascending: true)
             .execute()
             .value
 
+        print("✅ Récupéré \(response.count) photos pour l'événement \(eventId)")
         return response
-        */
-        return []
     }
 
-    func createGiftIdea(
-        eventId: String,
-        title: String,
-        description: String?,
-        productUrl: String?,
-        proposedBy: String
-    ) async throws -> RemoteGiftIdea {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let giftData: [String: AnyJSON] = [
-            "event_id": .string(eventId),
-            "title": .string(title),
-            "description": description.map { .string($0) } ?? .null,
-            "product_url": productUrl.map { .string($0) } ?? .null,
-            "proposed_by": .string(proposedBy)
-        ]
+    /// Créer une nouvelle photo d'événement
+    func createEventPhoto(_ photo: RemoteEventPhoto) async throws -> RemoteEventPhoto {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
 
-        let response: RemoteGiftIdea = try await client
-            .from("gift_ideas")
-            .insert(giftData)
+        let response: RemoteEventPhoto = try await client
+            .from("event_photos")
+            .insert(photo.toDictionary())
             .select()
             .single()
             .execute()
             .value
 
+        print("✅ Photo d'événement créée - ID: \(response.id)")
         return response
-        */
-        throw SupabaseError.notImplemented
     }
 
-    func deleteGiftIdea(id: String) async throws {
-        // TODO: Implémenter après installation du SDK
-        /*
+    /// Supprimer une photo d'événement
+    func deleteEventPhoto(id: UUID) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
+
         try await client
-            .from("gift_ideas")
+            .from("event_photos")
             .delete()
-            .eq("id", value: id)
+            .eq("id", value: id.uuidString)
             .execute()
-        */
-    }
 
-    // MARK: - Edge Functions
-
-    func convertAffiliateUrl(_ url: String) async throws -> String {
-        // TODO: Implémenter après installation du SDK
-        /*
-        struct ConvertRequest: Codable {
-            let url: String
-        }
-
-        struct ConvertResponse: Codable {
-            let success: Bool
-            let affiliateUrl: String?
-            let error: String?
-        }
-
-        let request = ConvertRequest(url: url)
-
-        let response: ConvertResponse = try await client.functions
-            .invoke(
-                SupabaseConfig.EdgeFunctions.affiliateConvert,
-                options: FunctionInvokeOptions(body: request)
-            )
-
-        guard response.success, let affiliateUrl = response.affiliateUrl else {
-            throw SupabaseError.edgeFunctionError(response.error ?? "Unknown error")
-        }
-
-        return affiliateUrl
-        */
-        return url
-    }
-
-    func shareEvent(eventId: String, inviteeEmail: String) async throws -> String {
-        // TODO: Implémenter après installation du SDK
-        /*
-        struct ShareRequest: Codable {
-            let eventId: String
-            let inviteeEmail: String
-        }
-
-        struct ShareResponse: Codable {
-            let success: Bool
-            let shareUrl: String?
-            let error: String?
-        }
-
-        let request = ShareRequest(eventId: eventId, inviteeEmail: inviteeEmail)
-
-        let response: ShareResponse = try await client.functions
-            .invoke(
-                SupabaseConfig.EdgeFunctions.eventsShare,
-                options: FunctionInvokeOptions(body: request)
-            )
-
-        guard response.success, let shareUrl = response.shareUrl else {
-            throw SupabaseError.edgeFunctionError(response.error ?? "Unknown error")
-        }
-
-        return shareUrl
-        */
-        return ""
+        print("✅ Photo d'événement supprimée - ID: \(id)")
     }
 
     // MARK: - Storage
 
-    func uploadEventImage(_ imageData: Data, eventId: String) async throws -> String {
-        // TODO: Implémenter après installation du SDK
-        /*
-        let fileName = "\(eventId)_\(UUID().uuidString).jpg"
-        let filePath = "\(SupabaseConfig.Storage.eventImages)/\(fileName)"
+    /// Upload une image vers Supabase Storage
+    /// - Parameters:
+    ///   - imageData: Données de l'image
+    ///   - bucket: Nom du bucket ("event-covers", "event-profiles", "event-photos", "wishlist-images")
+    ///   - fileName: Nom du fichier (doit être unique)
+    /// - Returns: URL publique de l'image uploadée
+    func uploadImage(_ imageData: Data, toBucket bucket: String, fileName: String) async throws -> String {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
 
+        // ✅ Upload le fichier vers le bucket
         try await client.storage
-            .from(SupabaseConfig.Storage.eventImages)
+            .from(bucket)
             .upload(
-                path: filePath,
-                file: imageData,
+                fileName,
+                data: imageData,
                 options: FileOptions(contentType: "image/jpeg")
             )
 
+        // ✅ Récupérer l'URL publique
         let publicURL = try client.storage
-            .from(SupabaseConfig.Storage.eventImages)
-            .getPublicURL(path: filePath)
+            .from(bucket)
+            .getPublicURL(path: fileName)
 
+        print("✅ Image uploadée - URL: \(publicURL.absoluteString)")
         return publicURL.absoluteString
-        */
-        return ""
     }
-}
 
-// MARK: - Remote Models
+    /// Supprimer une image du Storage
+    func deleteImage(at url: String, fromBucket bucket: String) async throws {
+        guard isAuthenticated else {
+            throw SupabaseError.notAuthenticated
+        }
 
-// Ces structures représentent les données telles qu'elles sont stockées dans Supabase
-// Elles seront converties vers les modèles SwiftData locaux
+        // Extraire le nom du fichier depuis l'URL
+        guard let fileName = URL(string: url)?.lastPathComponent else {
+            throw SupabaseError.invalidImageURL
+        }
 
-struct RemoteEvent: Codable {
-    let id: UUID
-    let ownerId: UUID
-    let title: String
-    let date: Date
-    let category: String
-    let notes: String
-    let hasGiftPool: Bool
-    let imageUrl: String?
-    let isRecurring: Bool
-    let createdAt: Date
-    let updatedAt: Date
+        try await client.storage
+            .from(bucket)
+            .remove(paths: [fileName])
 
-    enum CodingKeys: String, CodingKey {
-        case id
-        case ownerId = "owner_id"
-        case title
-        case date
-        case category
-        case notes
-        case hasGiftPool = "has_gift_pool"
-        case imageUrl = "image_url"
-        case isRecurring = "is_recurring"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
-struct RemoteParticipant: Codable {
-    let id: UUID
-    let eventId: UUID
-    let name: String
-    let phone: String?
-    let email: String?
-    let source: String
-    let contactIdentifier: String?
-    let socialMediaId: String?
-    let createdAt: Date
-    let updatedAt: Date
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case eventId = "event_id"
-        case name
-        case phone
-        case email
-        case source
-        case contactIdentifier = "contact_identifier"
-        case socialMediaId = "social_media_id"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
-struct RemoteGiftIdea: Codable {
-    let id: UUID
-    let eventId: UUID
-    let title: String
-    let description: String?
-    let productUrl: String?
-    let affiliateUrl: String?
-    let productImageUrl: String?
-    let price: Double?
-    let contributorId: UUID?
-    let proposedBy: String
-    let createdAt: Date
-    let updatedAt: Date
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case eventId = "event_id"
-        case title
-        case description
-        case productUrl = "product_url"
-        case affiliateUrl = "affiliate_url"
-        case productImageUrl = "product_image_url"
-        case price
-        case contributorId = "contributor_id"
-        case proposedBy = "proposed_by"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
+        print("✅ Image supprimée - Fichier: \(fileName)")
     }
 }
 
@@ -501,25 +425,20 @@ struct RemoteGiftIdea: Codable {
 
 enum SupabaseError: LocalizedError {
     case notImplemented
+    case notAuthenticated
     case noUserReturned
-    case edgeFunctionError(String)
+    case invalidImageURL
 
     var errorDescription: String? {
         switch self {
         case .notImplemented:
-            return "Cette fonctionnalité n'est pas encore implémentée. Veuillez installer le SDK Supabase."
+            return "Cette fonctionnalité n'est pas encore implémentée."
+        case .notAuthenticated:
+            return "Vous devez être connecté pour effectuer cette action."
         case .noUserReturned:
             return "Aucun utilisateur retourné par Supabase"
-        case .edgeFunctionError(let message):
-            return "Erreur Edge Function: \(message)"
+        case .invalidImageURL:
+            return "URL d'image invalide"
         }
     }
-}
-
-// MARK: - User Model
-
-struct User: Codable {
-    let id: UUID
-    let email: String
-    let name: String?
 }
