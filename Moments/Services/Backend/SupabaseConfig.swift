@@ -3,16 +3,30 @@
 //  Moments
 //
 //  Configuration pour Supabase
+//  ✅ Lecture sécurisée des clés depuis Info.plist (alimenté par .xcconfig)
 //
 
 import Foundation
 
 struct SupabaseConfig {
-    // IMPORTANT: Remplacez ces valeurs par vos vraies valeurs Supabase
-    // Vous les trouverez dans: Dashboard Supabase > Settings > API
+    // ✅ Lecture sécurisée des credentials depuis Info.plist
+    // Les valeurs sont définies dans Debug.xcconfig / Release.xcconfig
+    // et ne sont JAMAIS committées sur Git
 
-    static let supabaseURL = URL(string: "https://ksbsvscfplmokacngouo.supabase.co")!
-    static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtzYnN2c2NmcGxtb2thY25nb3VvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4NzM1NDAsImV4cCI6MjA4MDQ0OTU0MH0.zbeowqtJ5yxieZ63yMXXk-Dy0OMrbVQqtPcIUIJ8fSc"
+    static var supabaseURL: URL {
+        guard let urlString = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String,
+              let url = URL(string: urlString) else {
+            fatalError("❌ SUPABASE_URL manquante dans Info.plist. Vérifier Debug.xcconfig / Release.xcconfig")
+        }
+        return url
+    }
+
+    static var supabaseAnonKey: String {
+        guard let key = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String else {
+            fatalError("❌ SUPABASE_ANON_KEY manquante dans Info.plist. Vérifier Debug.xcconfig / Release.xcconfig")
+        }
+        return key
+    }
 
     // Configuration pour les Edge Functions
     struct EdgeFunctions {

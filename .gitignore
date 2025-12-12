@@ -106,6 +106,8 @@ iOSInjectionProject/
 .env
 .env.local
 
-# API Keys (never commit these!)
-**/SupabaseConfig.swift
+# API Keys and Configuration (NEVER commit these!)
+# ⚠️ Les fichiers .xcconfig contiennent les clés secrètes Supabase
+Moments/Config/Debug.xcconfig
+Moments/Config/Release.xcconfig
 **/Secrets.swift

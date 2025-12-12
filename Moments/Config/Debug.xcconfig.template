@@ -1,0 +1,16 @@
+//
+// Debug.xcconfig.template
+// Moments
+//
+// Template pour Debug.xcconfig
+// ✅ CE FICHIER PEUT ÊTRE COMMITÉ SUR GIT (il ne contient pas de secrets)
+//
+// Pour l'utiliser:
+// 1. Copier ce fichier vers Debug.xcconfig
+// 2. Remplacer YOUR_SUPABASE_URL et YOUR_SUPABASE_ANON_KEY par vos vraies valeurs
+// 3. Ne JAMAIS commiter Debug.xcconfig sur Git
+//
+
+// Supabase Configuration
+SUPABASE_URL = https:/$()/YOUR_SUPABASE_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY = YOUR_SUPABASE_ANON_KEY_HERE
