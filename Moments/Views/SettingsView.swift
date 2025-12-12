@@ -134,7 +134,7 @@ struct SettingsView: View {
                 }
 
                 Section("Informations légales") {
-                    Link(destination: URL(string: "https://raw.githubusercontent.com/YOUR_USERNAME/Moments/main/docs/privacy-policy.md")!) {
+                    Link(destination: URL(string: "https://teddydbs.github.io/Moments/privacy-policy")!) {
                         HStack {
                             Image(systemName: "hand.raised.fill")
                                 .foregroundColor(.blue)
@@ -143,7 +143,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    Link(destination: URL(string: "https://raw.githubusercontent.com/YOUR_USERNAME/Moments/main/docs/terms-of-service.md")!) {
+                    Link(destination: URL(string: "https://teddydbs.github.io/Moments/terms-of-service")!) {
                         HStack {
                             Image(systemName: "doc.text.fill")
                                 .foregroundColor(.blue)
