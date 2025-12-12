@@ -71,11 +71,16 @@ struct AddEditWishlistItemView: View {
                                     .textContentType(.URL)
                                     .autocapitalization(.none)
                                     .keyboardType(.URL)
+                                    .onChange(of: url) { oldValue, newValue in
+                                        // ✅ Auto-fill IMMÉDIAT dès qu'on colle une URL
+                                        if isValidURL(newValue) && !isAutoFilling && newValue != oldValue {
+                                            autoFillFromURLFast()
+                                        }
+                                    }
 
-                                // ✅ Bouton Coller OU Charger
+                                // ✅ Bouton Coller
                                 if url.isEmpty {
                                     Button {
-                                        // Récupérer le contenu du presse-papiers
                                         if let clipboardContent = UIPasteboard.general.string {
                                             url = clipboardContent
                                         }
@@ -84,19 +89,6 @@ struct AddEditWishlistItemView: View {
                                             .font(.subheadline)
                                             .foregroundStyle(MomentsTheme.primaryGradient)
                                     }
-                                } else if isValidURL(url) {
-                                    Button {
-                                        autoFillFromURLInstant()
-                                    } label: {
-                                        if isAutoFilling {
-                                            ProgressView()
-                                                .scaleEffect(0.7)
-                                        } else {
-                                            Image(systemName: "arrow.down.circle")
-                                                .foregroundStyle(MomentsTheme.primaryGradient)
-                                        }
-                                    }
-                                    .disabled(isAutoFilling)
                                 }
                             }
 
@@ -277,20 +269,30 @@ struct AddEditWishlistItemView: View {
         return url.scheme == "http" || url.scheme == "https"
     }
 
-    /// ✅ NOUVEAU : Remplissage INSTANTANÉ - Lance le chargement en arrière-plan
-    /// L'utilisateur peut continuer à utiliser l'app, les champs se remplissent progressivement
-    private func autoFillFromURLInstant() {
+    /// ✅ ULTRA-RAPIDE : Timeout 5s max, fallback immédiat
+    private func autoFillFromURLFast() {
         isAutoFilling = true
 
-        // 🚀 Lancer le chargement EN ARRIÈRE-PLAN (ne bloque pas l'UI)
         Task {
-            // ✅ Récupérer métadonnées
-            if let metadata = await metadataFetcher.fetchMetadata(from: url) {
-                // ✅ Mettre à jour l'UI progressivement
-                await MainActor.run {
-                    if let productTitle = metadata.title {
-                        title = productTitle
-                    }
+            // ⚡ Lancer le fetch avec timeout de 5s
+            let fetchTask = Task {
+                await metadataFetcher.fetchMetadata(from: url)
+            }
+
+            // Attendre max 5 secondes
+            do {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                fetchTask.cancel()
+            } catch {
+                // Task annulée, c'est normal
+            }
+
+            let metadata = await fetchTask.value
+
+            await MainActor.run {
+                if let metadata = metadata, let productTitle = metadata.title {
+                    // ✅ Succès : on a les vraies métadonnées
+                    title = productTitle
 
                     if let productPrice = metadata.price {
                         price = String(format: "%.2f", productPrice)
@@ -300,22 +302,46 @@ struct AddEditWishlistItemView: View {
                         imageData = productImageData
                     }
 
-                    // Feedback haptique de succès
                     let generator = UINotificationFeedbackGenerator()
                     generator.notificationOccurred(.success)
+                } else {
+                    // ⚡ Échec ou timeout : titre intelligent depuis URL
+                    title = extractSmartTitleFromURL(url)
 
-                    isAutoFilling = false
-                }
-            } else {
-                await MainActor.run {
-                    // Feedback haptique d'erreur
                     let generator = UINotificationFeedbackGenerator()
-                    generator.notificationOccurred(.error)
-
-                    isAutoFilling = false
+                    generator.notificationOccurred(.warning)
                 }
+
+                isAutoFilling = false
             }
         }
+    }
+
+    /// Extrait un titre intelligent depuis une URL (fallback ultra-rapide)
+    private func extractSmartTitleFromURL(_ urlString: String) -> String {
+        guard let url = URL(string: urlString) else { return "Produit" }
+
+        // Amazon : "Produit Amazon"
+        if url.host?.contains("amazon") == true {
+            return "Produit Amazon"
+        }
+
+        // Fnac : "Produit Fnac"
+        if url.host?.contains("fnac") == true {
+            return "Produit Fnac"
+        }
+
+        // Fallback : extraire depuis le path
+        let pathComponents = url.path.split(separator: "/")
+        if let slug = pathComponents.last, slug.count > 3 {
+            let cleaned = String(slug)
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .prefix(50)
+            return String(cleaned).capitalized
+        }
+
+        return "Produit"
     }
 
     private func loadItemData() {
