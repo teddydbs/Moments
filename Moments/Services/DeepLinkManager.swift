@@ -21,6 +21,9 @@ class DeepLinkManager {
     /// L'événement à ouvrir (détecté depuis un deep link)
     var eventToOpen: UUID?
 
+    /// Le token d'invitation à traiter (détecté depuis un deep link)
+    var invitationTokenToHandle: String?
+
     private init() {}
 
     // MARK: - Génération de liens
@@ -75,9 +78,53 @@ class DeepLinkManager {
         """
     }
 
+    // MARK: - Génération de liens d'invitation
+
+    /// Génère un lien de partage pour une invitation
+    /// - Parameter token: Le token unique de l'invitation
+    /// - Returns: L'URL d'invitation
+    func generateInvitationShareLink(token: String) -> URL {
+        let urlString = "\(urlScheme)invite?token=\(token)"
+        return URL(string: urlString)!
+    }
+
+    /// Génère un message de partage complet pour une invitation
+    /// - Parameters:
+    ///   - guestName: Le nom de l'invité
+    ///   - eventTitle: Le titre de l'événement
+    ///   - eventDate: La date de l'événement
+    ///   - token: Le token d'invitation
+    /// - Returns: Le texte à partager avec le lien
+    func generateInvitationMessage(
+        guestName: String,
+        eventTitle: String,
+        eventDate: Date,
+        token: String
+    ) -> String {
+        let link = generateInvitationShareLink(token: token)
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .long
+        dateFormatter.timeStyle = .none
+        dateFormatter.locale = Locale(identifier: "fr_FR")
+
+        let formattedDate = dateFormatter.string(from: eventDate)
+
+        return """
+        Salut \(guestName) ! 👋
+
+        Je t'invite à mon événement "\(eventTitle)" le \(formattedDate).
+
+        Clique sur ce lien pour répondre à l'invitation :
+        \(link.absoluteString)
+
+        À bientôt ! 🎉
+        """
+    }
+
     // MARK: - Parsing de liens
 
-    /// Parse une URL reçue pour extraire l'ID de l'événement
+    /// Parse une URL reçue pour extraire l'ID de l'événement ou le token d'invitation
     /// - Parameter url: L'URL à parser
     /// - Returns: L'ID de l'événement si valide, nil sinon
     func handleIncomingURL(_ url: URL) -> UUID? {
@@ -88,9 +135,16 @@ class DeepLinkManager {
             return nil
         }
 
-        // ✅ ÉTAPE 1: Vérifier le host (doit être "event")
-        guard url.host() == "event" else {
-            print("❌ Host invalide: \(url.host() ?? "nil")")
+        let host = url.host()
+
+        // ✅ CAS 1: Invitation (moments://invite?token=XXX)
+        if host == "invite" {
+            return handleInvitationURL(url)
+        }
+
+        // ✅ CAS 2: Événement (moments://event/{eventId})
+        guard host == "event" else {
+            print("❌ Host invalide: \(host ?? "nil")")
             return nil
         }
 
@@ -108,6 +162,28 @@ class DeepLinkManager {
         return eventId
     }
 
+    /// Parse une URL d'invitation pour extraire le token
+    /// - Parameter url: L'URL d'invitation (moments://invite?token=XXX)
+    /// - Returns: Nil (le token est stocké dans invitationTokenToHandle)
+    private func handleInvitationURL(_ url: URL) -> UUID? {
+        // Extraire le query parameter "token"
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems,
+              let tokenItem = queryItems.first(where: { $0.name == "token" }),
+              let token = tokenItem.value else {
+            print("❌ Token d'invitation manquant dans l'URL")
+            return nil
+        }
+
+        print("✅ Invitation détectée depuis le lien: token=\(token)")
+
+        // Stocker le token pour qu'il soit traité par l'app
+        self.invitationTokenToHandle = token
+
+        // Retourner nil car ce n'est pas un événement direct
+        return nil
+    }
+
     /// Définit l'événement à ouvrir (depuis un deep link)
     /// - Parameter eventId: L'ID de l'événement
     func setEventToOpen(_ eventId: UUID) {
@@ -117,6 +193,17 @@ class DeepLinkManager {
     /// Réinitialise l'événement à ouvrir (après l'avoir traité)
     func clearEventToOpen() {
         self.eventToOpen = nil
+    }
+
+    /// Définit le token d'invitation à traiter
+    /// - Parameter token: Le token d'invitation
+    func setInvitationTokenToHandle(_ token: String) {
+        self.invitationTokenToHandle = token
+    }
+
+    /// Réinitialise le token d'invitation (après l'avoir traité)
+    func clearInvitationToken() {
+        self.invitationTokenToHandle = nil
     }
 }
 
